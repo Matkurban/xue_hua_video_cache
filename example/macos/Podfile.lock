@@ -1,0 +1,22 @@
+PODS:
+  - FlutterMacOS (1.0.0)
+  - xue_hua_video_cache (0.0.1):
+    - FlutterMacOS
+
+DEPENDENCIES:
+  - FlutterMacOS (from `Flutter/ephemeral`)
+  - xue_hua_video_cache (from `Flutter/ephemeral/.symlinks/plugins/xue_hua_video_cache/macos`)
+
+EXTERNAL SOURCES:
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+  xue_hua_video_cache:
+    :path: Flutter/ephemeral/.symlinks/plugins/xue_hua_video_cache/macos
+
+SPEC CHECKSUMS:
+  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
+  xue_hua_video_cache: 898ce3f2f8362a0e92bd3e2580f805ff80c47115
+
+PODFILE CHECKSUM: 54d867c82ac51cbd61b565781b9fada492027009
+
+COCOAPODS: 1.16.2

@@ -1,0 +1,38 @@
+name: xue_hua_video_cache
+description: "Video caching plugin with XueHUAEVideoCache.initialize entry — Rust port of flutter_video_caching."
+version: 1.0.0
+homepage: https://github.com/windows7lake/flutter_video_caching
+
+environment:
+  sdk: ^3.12.2
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_rust_bridge: 2.12.0
+  path_provider: ^2.1.5
+  plugin_platform_interface: ^2.0.2
+
+dev_dependencies:
+  ffi: ^2.1.3
+  ffigen: ^20.1.1
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  integration_test:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        ffiPlugin: true
+      ios:
+        ffiPlugin: true
+      linux:
+        ffiPlugin: true
+      macos:
+        ffiPlugin: true
+      windows:
+        ffiPlugin: true
