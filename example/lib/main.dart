@@ -7,7 +7,7 @@ const _sampleMp4 =
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await XueHUAEVideoCache.initialize(logPrint: true);
+  await XueHuaVideoCache.initialize(logPrint: true);
   runApp(const ExampleApp());
 }
 
@@ -21,7 +21,7 @@ class ExampleApp extends StatefulWidget {
 class _ExampleAppState extends State<ExampleApp> {
   @override
   void dispose() {
-    XueHUAEVideoCache.dispose();
+    XueHuaVideoCache.dispose();
     super.dispose();
   }
 
@@ -55,8 +55,8 @@ class _VideoPlayPageState extends State<VideoPlayPage> {
   Future<void> _init() async {
     try {
       // butterfly.mp4 is ~2.4MB; default segment size is 2MB — cache both segments.
-      await VideoCaching.precache(_sampleMp4, cacheSegments: 2);
-      _cached = await VideoCaching.isCached(_sampleMp4, cacheSegments: 2);
+      // await XueHuaVideoCache.precache(_sampleMp4, cacheSegments: 2);
+      _cached = await XueHuaVideoCache.isCached(_sampleMp4, cacheSegments: 2);
       final uri = _sampleMp4.toLocalUri();
       final controller = VideoPlayerController.networkUrl(uri);
       await controller.initialize();

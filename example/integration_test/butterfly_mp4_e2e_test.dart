@@ -13,7 +13,7 @@ Future<bool> _waitCached(String url, {required int segments}) async {
   const timeout = Duration(seconds: 45);
   final deadline = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(deadline)) {
-    if (await VideoCaching.isCached(url, cacheSegments: segments)) {
+    if (await XueHuaVideoCache.isCached(url, cacheSegments: segments)) {
       return true;
     }
     await Future<void>.delayed(const Duration(milliseconds: 400));
@@ -38,7 +38,7 @@ void main() {
       final cacheRoot =
           '${Directory.systemTemp.path}/xue_hua_butterfly_e2e_${DateTime.now().microsecondsSinceEpoch}';
       await Directory(cacheRoot).create(recursive: true);
-      await XueHUAEVideoCache.initialize(
+      await XueHuaVideoCache.initialize(
         cacheDir: cacheRoot,
         logPrint: false,
         segmentSize: 2,
@@ -47,16 +47,16 @@ void main() {
     });
 
     tearDownAll(() async {
-      await XueHUAEVideoCache.dispose();
+      await XueHuaVideoCache.dispose();
     });
 
     test('precache marks segments cached and proxy URL is local', () async {
       expect(
-        await VideoCaching.isCached(butterflyMp4TestUrl, cacheSegments: 2),
+        await XueHuaVideoCache.isCached(butterflyMp4TestUrl, cacheSegments: 2),
         isFalse,
       );
 
-      await VideoCaching.precache(
+      await XueHuaVideoCache.precache(
         butterflyMp4TestUrl,
         cacheSegments: 2,
         downloadNow: true,

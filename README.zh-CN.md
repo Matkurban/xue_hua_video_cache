@@ -2,16 +2,14 @@
 
 [English](README.md) | **简体中文**
 
-Flutter 视频缓存插件，核心由 Rust 实现。本项目为 [flutter_video_caching](https://github.com/windows7lake/flutter_video_caching) 的移植版（对照 upstream v1.1.4，参考源码位于 `third_party/flutter_video_caching/`）。
-
-通过本地 HTTP 代理 + LRU 内存/磁盘缓存 + 分段 Range 下载，支持 **MP4** 与 **HLS (M3U8)**，可与 `video_player` 等播放器配合使用。
+Flutter 视频缓存插件，核心由 Rust 实现。通过本地 HTTP 代理 + LRU 内存/磁盘缓存 + 分段 Range 下载，支持 **MP4** 与 **HLS (M3U8)**，可与 `video_player` 等播放器配合使用。
 
 ## 功能特性
 
 - **统一入口** — `XueHUAEVideoCache.initialize()` 启动本地代理与下载池
 - **透明播放** — 使用 `String.toLocalUri()` / `toLocalUrl()` 将远程 URL 改写为本地代理地址
-- **预缓存** — `VideoCaching.precache()`，可选进度流 `progressListen`
-- **下载管理** — 按任务 ID / URL 暂停、恢复、取消；HLS 感知的 `cancelTaskAboutUrl`
+- **预缓存** — `XueHuaVideoCache.precache()`，可选进度流 `progressListen`
+- **下载管理** — `XueHuaVideoCache.pauseTaskById()` / `resumeTaskByUrl()` / `cancelAllTasks()`；HLS 感知的 `cancelTaskAboutUrl`
 - **可配置缓存键** — `ignoreQueryKeys` 忽略易变 query 参数（如 `token`）
 - **跨平台** — Android、iOS、macOS、Linux、Windows（FFI + flutter_rust_bridge 2.12）
 
@@ -45,13 +43,13 @@ import 'package:video_player/video_player.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await XueHUAEVideoCache.initialize();
+  await XueHuaVideoCache.initialize();
   runApp(const MyApp());
 }
 
 // 预缓存后通过本地代理播放
 const url = 'https://example.com/video.mp4';
-await VideoCaching.precache(url, cacheSegments: 2);
+await XueHuaVideoCache.precache(url, cacheSegments: 2);
 final controller = VideoPlayerController.networkUrl(url.toLocalUri());
 await controller.initialize();
 controller.play();
@@ -64,12 +62,14 @@ controller.play();
 | `XueHUAEVideoCache.initialize(...)` | 启动代理、LRU 缓存与下载管理器 |
 | `XueHUAEVideoCache.restart()` | 重启代理并刷新下载管理器 |
 | `XueHUAEVideoCache.isRunning()` | 本地代理健康检查 |
-| `VideoCaching.precache(...)` | 排队或下载分段；可选 `progressListen` |
-| `VideoCaching.isCached(...)` | 检查是否已缓存指定数量的分段 |
-| `VideoCaching.parseHlsMasterPlaylist(...)` | 解析远程 M3U8 主列表 |
+| `XueHuaVideoCache.precache(...)` | 排队或下载分段；可选 `progressListen` |
+| `XueHuaVideoCache.isCached(...)` | 检查是否已缓存指定数量的分段 |
+| `XueHuaVideoCache.parseHlsMasterPlaylist(...)` | 解析远程 M3U8 主列表 |
 | `String.toLocalUri()` / `toLocalUrl()` | 改写为本地代理 URL |
-| `XueHUAEVideoCache.downloadManager` | 任务流及取消/暂停/恢复 API |
-| `LruCacheSingleton.removeCacheByUrl(...)` | 按 URL 移除缓存 |
+| `XueHuaVideoCache.downloadStream` | 下载任务事件流 |
+| `XueHuaVideoCache.allDownloadTasks()` / `downloadingTasks()` | 列出下载任务 |
+| `XueHuaVideoCache.pauseTaskById(...)` / `resumeTaskByUrl(...)` 等 | 暂停、恢复、取消下载 |
+| `XueHuaVideoCache.removeCacheByUrl(...)` | 按 URL 移除缓存 |
 
 ### 自定义 cache key
 
@@ -147,7 +147,6 @@ flutter_rust_bridge_codegen generate
 
 ## 相关链接
 
-- 上游项目：[flutter_video_caching](https://github.com/windows7lake/flutter_video_caching)
 - 测试样例视频：[butterfly.mp4](https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4)
 - [更新日志](CHANGELOG.md)
 

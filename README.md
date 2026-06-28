@@ -2,16 +2,14 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-A Flutter video caching plugin with a Rust core. It is a port of [flutter_video_caching](https://github.com/windows7lake/flutter_video_caching) (upstream v1.1.4; reference sources live in `third_party/flutter_video_caching/`).
-
-Local HTTP proxy + LRU memory/disk cache + segmented Range downloads for **MP4** and **HLS (M3U8)** playback with players such as `video_player`.
+A Flutter video caching plugin with a Rust core. Local HTTP proxy + LRU memory/disk cache + segmented Range downloads for **MP4** and **HLS (M3U8)** playback with players such as `video_player`.
 
 ## Features
 
 - **Unified entry** — `XueHUAEVideoCache.initialize()` starts the local proxy and download pool
 - **Transparent playback** — rewrite remote URLs with `String.toLocalUri()` / `toLocalUrl()`
-- **Pre-cache** — `VideoCaching.precache()` with optional progress stream
-- **Download manager** — pause / resume / cancel by task id or URL; HLS-aware `cancelTaskAboutUrl`
+- **Pre-cache** — `XueHuaVideoCache.precache()` with optional progress stream
+- **Download manager** — `XueHuaVideoCache.pauseTaskById()` / `resumeTaskByUrl()` / `cancelAllTasks()`; HLS-aware `cancelTaskAboutUrl`
 - **Configurable cache keys** — `ignoreQueryKeys` strips volatile query params (e.g. `token`)
 - **Cross-platform** — Android, iOS, macOS, Linux, Windows (FFI + flutter_rust_bridge 2.12)
 
@@ -45,13 +43,13 @@ import 'package:video_player/video_player.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await XueHUAEVideoCache.initialize();
+  await XueHuaVideoCache.initialize();
   runApp(const MyApp());
 }
 
 // Pre-cache then play through the local proxy
 const url = 'https://example.com/video.mp4';
-await VideoCaching.precache(url, cacheSegments: 2);
+await XueHuaVideoCache.precache(url, cacheSegments: 2);
 final controller = VideoPlayerController.networkUrl(url.toLocalUri());
 await controller.initialize();
 controller.play();
@@ -64,19 +62,21 @@ controller.play();
 | `XueHUAEVideoCache.initialize(...)` | Start proxy, LRU cache, and download manager |
 | `XueHUAEVideoCache.restart()` | Restart proxy and refresh download manager |
 | `XueHUAEVideoCache.isRunning()` | Health check for the local proxy |
-| `VideoCaching.precache(...)` | Queue or download segments; optional `progressListen` |
-| `VideoCaching.isCached(...)` | Check whether N segments are cached |
-| `VideoCaching.parseHlsMasterPlaylist(...)` | Parse remote M3U8 master playlist |
+| `XueHuaVideoCache.precache(...)` | Queue or download segments; optional `progressListen` |
+| `XueHuaVideoCache.isCached(...)` | Check whether N segments are cached |
+| `XueHuaVideoCache.parseHlsMasterPlaylist(...)` | Parse remote M3U8 master playlist |
 | `String.toLocalUri()` / `toLocalUrl()` | Rewrite URL to local proxy |
-| `XueHUAEVideoCache.downloadManager` | Task stream and cancel/pause/resume APIs |
-| `LruCacheSingleton.removeCacheByUrl(...)` | Remove cache entry by URL |
+| `XueHuaVideoCache.downloadStream` | Download task event stream |
+| `XueHuaVideoCache.allDownloadTasks()` / `downloadingTasks()` | List download tasks |
+| `XueHuaVideoCache.pauseTaskById(...)` / `resumeTaskByUrl(...)` / etc. | Pause, resume, cancel downloads |
+| `XueHuaVideoCache.removeCacheByUrl(...)` | Remove cache entry by URL |
 
 ### Cache key customization
 
 If URLs carry volatile query parameters, ignore them when computing cache keys:
 
 ```dart
-await XueHUAEVideoCache.initialize(
+await XueHuaVideoCache.initialize(
   ignoreQueryKeys: ['token', 'expires'],
 );
 ```
@@ -147,7 +147,6 @@ flutter_rust_bridge_codegen generate
 
 ## Related
 
-- Upstream: [flutter_video_caching](https://github.com/windows7lake/flutter_video_caching)
 - Sample video used in tests: [butterfly.mp4](https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4)
 - [CHANGELOG](CHANGELOG.md)
 
