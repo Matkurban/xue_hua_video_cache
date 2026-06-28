@@ -1,6 +1,6 @@
 [package]
 name = "xue_hua_video_cache"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 
 [lib]

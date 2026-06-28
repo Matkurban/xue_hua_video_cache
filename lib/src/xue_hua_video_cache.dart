@@ -27,7 +27,9 @@ class XueHuaVideoCache {
     int maxConcurrentDownloads = 4,
     List<String> ignoreQueryKeys = const [],
   }) async {
-    await RustLib.init();
+    if (!RustLib.instance.initialized) {
+      await RustLib.init();
+    }
     final cacheRoot = cacheDir.isNotEmpty
         ? cacheDir
         : '${(await getApplicationCacheDirectory()).path}/videos';
@@ -73,8 +75,10 @@ class XueHuaVideoCache {
 
   /// Stops the health monitor, download pool, and local proxy listener.
   ///
-  /// After dispose, plugin APIs return an error until the process restarts.
-  /// [initialize] cannot be called again in the same process (native state is one-shot).
+  /// After [dispose], plugin APIs return an error until the process restarts.
+  /// [initialize] cannot be called again in the same process after [dispose]
+  /// (native state is one-shot). Flutter hot restart re-runs [initialize]
+  /// safely when native state was not disposed.
   static Future<void> dispose() async {
     if (!_initialized) return;
     await frb.videoProxyDispose();

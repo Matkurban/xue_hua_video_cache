@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-06-28
+
+### Fixed
+
+- **Hot restart** — calling `XueHuaVideoCache.initialize()` after a Flutter hot restart no longer throws `XueHUAEVideoCache already initialized`; native state is reused and the proxy is restarted idempotently
+- **`RustLib.init()`** — skip re-initialization when flutter_rust_bridge is already loaded in the same process
+
+### Added
+
+- Regression test `test/hot_restart_init_test.dart` and Rust unit test `init_twice_is_idempotent`
+
 ## [1.0.0] - 2026-06-28
 
 First stable release with a Rust core and unified Dart entry point.
@@ -33,5 +44,3 @@ First stable release with a Rust core and unified Dart entry point.
 - Dart LRU introspection API is minimal (`removeCacheByUrl` only)
 - HLS long-video cancellation and `download_now: false` queueing should be validated in production workloads
 - Large segment files are read fully into memory on download completion (memory pressure for very large segments)
-
-[1.0.0]: #

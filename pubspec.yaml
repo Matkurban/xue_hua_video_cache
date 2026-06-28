@@ -1,6 +1,6 @@
 name: xue_hua_video_cache
 description: "Video caching plugin with XueHUAEVideoCache.initialize entry and a Rust core."
-version: 1.0.0
+version: 1.0.1
 homepage: https://github.com/Matkurban/xue_hua_video_cache
 repository: https://github.com/Matkurban/xue_hua_video_cache
 issue_tracker: https://github.com/Matkurban/xue_hua_video_cache/issues
