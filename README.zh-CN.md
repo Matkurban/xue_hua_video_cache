@@ -23,15 +23,7 @@ Flutter 视频缓存插件，核心由 Rust 实现。通过本地 HTTP 代理 + 
 
 ```yaml
 dependencies:
-  xue_hua_video_cache: ^1.0.0
-```
-
-开发阶段可使用 path / git 依赖：
-
-```yaml
-dependencies:
-  xue_hua_video_cache:
-    path: ../xue_hua_video_cache
+  xue_hua_video_cache: ^lasted
 ```
 
 ## 快速开始
@@ -104,46 +96,89 @@ Rust 核心
   └── UrlParser（MP4 / M3U8 / default）
 ```
 
-## 测试
+## 平台配置
 
-快速冒烟测试（curl + Rust 单元测试，默认不含网络 E2E）：
+插件会在 **`127.0.0.1`** 上启动本地 HTTP 代理。使用 `toLocalUri()` 改写 URL 后，播放器将通过 localhost 的明文 HTTP 拉流，因此移动端与沙盒桌面端需要显式放行该流量，并保留访问源站的正常网络权限。
 
-```bash
-./scripts/test_butterfly.sh
+完整示例见 [`example/`](example/)。
+
+### Android
+
+**1. 网络权限** — 在 `android/app/src/main/AndroidManifest.xml` 中添加：
+
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    ...
+</manifest>
 ```
 
-Rust 单元测试：
+**2. 允许 localhost 明文 HTTP** — 新建 `android/app/src/main/res/xml/network_security_config.xml`：
 
-```bash
-cd rust && cargo test
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">127.0.0.1</domain>
+  </domain-config>
+</network-security-config>
 ```
 
-Opt-in 网络 E2E（butterfly.mp4）：
+**3. 引用网络安全配置** — 在 `AndroidManifest.xml` 的 `<application>` 上声明：
 
-```bash
-cd rust && cargo test -- --ignored butterfly
-RUN_NETWORK_E2E=1 cd example && flutter test integration_test/butterfly_mp4_e2e_test.dart -d macos
+```xml
+<application
+    android:networkSecurityConfig="@xml/network_security_config"
+    ...>
 ```
 
-运行示例应用：
+> API 28+ 建议使用仅针对 `127.0.0.1` 的 `networkSecurityConfig`，而不是全局 `android:usesCleartextTraffic="true"`（后者会放行所有主机的明文流量）。
 
-```bash
-cd example && flutter run
+### iOS
+
+在 `ios/Runner/Info.plist` 中为本地代理添加 App Transport Security 例外：
+
+```xml
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <false/>
+    <key>NSExceptionDomains</key>
+    <dict>
+        <key>127.0.0.1</key>
+        <dict>
+            <key>NSExceptionAllowsInsecureHTTPLoads</key>
+            <true/>
+            <key>NSIncludesSubdomains</key>
+            <false/>
+        </dict>
+    </dict>
+</dict>
 ```
 
-## 平台说明
+保持 `NSAllowsArbitraryLoads` 为 `false`，仅对 `127.0.0.1` 开放例外即可。
 
-- **Android / iOS** — 需允许访问 `127.0.0.1` 明文 HTTP，参见 `example/android/`、`example/ios/`。
-- **macOS** — 出站网络需 `com.apple.security.network.client`，参见 `example/macos/Runner/*.entitlements`。
+### macOS
+
+沙盒化的 macOS 应用需要同时允许出站下载与本地监听。在 `macos/Runner/DebugProfile.entitlements` 与 `macos/Runner/Release.entitlements` 中添加：
+
+```xml
+<key>com.apple.security.network.client</key>
+<true/>
+<key>com.apple.security.network.server</key>
+<true/>
+```
+
+- `network.client` — 从远程源站下载视频
+- `network.server` — 运行 localhost HTTP 代理
+
+### Linux 与 Windows
+
+无需额外 manifest 或 entitlement 配置。确保宿主机能访问源站，并可在 `127.0.0.1` 上绑定/监听端口。
+
+### 使用提示
+
 - **分段大小** — 文件超过一个分段时，请预缓存足够分段（例如默认 2 MB 分段下，~2.4 MB 视频建议 `cacheSegments: 2`），或依赖代理按需拉取。
-
-## 开发
-
-修改 `rust/src/api/` 后重新生成 FRB 绑定：
-
-```bash
-flutter_rust_bridge_codegen generate
-```
 
 ## 相关链接
 

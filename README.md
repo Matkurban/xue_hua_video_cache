@@ -23,15 +23,7 @@ A Flutter video caching plugin with a Rust core. Local HTTP proxy + LRU memory/d
 
 ```yaml
 dependencies:
-  xue_hua_video_cache: ^1.0.0
-```
-
-Or use a path/git dependency while developing:
-
-```yaml
-dependencies:
-  xue_hua_video_cache:
-    path: ../xue_hua_video_cache
+  xue_hua_video_cache: ^lasted
 ```
 
 ## Quick start
@@ -104,46 +96,89 @@ Rust core
   └── UrlParser (MP4 / M3U8 / default)
 ```
 
-## Testing
+## Platform setup
 
-Fast smoke test (curl + Rust unit tests, no network E2E by default):
+The plugin starts a **local HTTP proxy** on `127.0.0.1`. After rewriting URLs with `toLocalUri()`, the media player loads video over plain HTTP from localhost. Mobile and sandboxed desktop targets therefore need explicit permission for that traffic, plus normal network access for origin downloads.
 
-```bash
-./scripts/test_butterfly.sh
+Reference implementations live under [`example/`](example/).
+
+### Android
+
+**1. Internet permission** — add to `android/app/src/main/AndroidManifest.xml`:
+
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    ...
+</manifest>
 ```
 
-Rust unit tests:
+**2. Cleartext HTTP for localhost** — create `android/app/src/main/res/xml/network_security_config.xml`:
 
-```bash
-cd rust && cargo test
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">127.0.0.1</domain>
+  </domain-config>
+</network-security-config>
 ```
 
-Opt-in network E2E (butterfly.mp4):
+**3. Reference the config** — on the `<application>` tag in `AndroidManifest.xml`:
 
-```bash
-cd rust && cargo test -- --ignored butterfly
-RUN_NETWORK_E2E=1 cd example && flutter test integration_test/butterfly_mp4_e2e_test.dart -d macos
+```xml
+<application
+    android:networkSecurityConfig="@xml/network_security_config"
+    ...>
 ```
 
-Run the example app:
+> On API 28+, scoped `networkSecurityConfig` is preferred over `android:usesCleartextTraffic="true"`, which allows cleartext for all hosts.
 
-```bash
-cd example && flutter run
+### iOS
+
+Add an App Transport Security exception for the local proxy in `ios/Runner/Info.plist`:
+
+```xml
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <false/>
+    <key>NSExceptionDomains</key>
+    <dict>
+        <key>127.0.0.1</key>
+        <dict>
+            <key>NSExceptionAllowsInsecureHTTPLoads</key>
+            <true/>
+            <key>NSIncludesSubdomains</key>
+            <false/>
+        </dict>
+    </dict>
+</dict>
 ```
 
-## Platform notes
+Keep `NSAllowsArbitraryLoads` disabled; only `127.0.0.1` needs the exception.
 
-- **Android / iOS** — allow cleartext HTTP to `127.0.0.1`; see `example/android/` and `example/ios/`.
-- **macOS** — `com.apple.security.network.client` entitlement for outbound downloads; see `example/macos/Runner/*.entitlements`.
+### macOS
+
+Sandboxed macOS apps need both outbound downloads and a local listener. Add to `macos/Runner/DebugProfile.entitlements` and `macos/Runner/Release.entitlements`:
+
+```xml
+<key>com.apple.security.network.client</key>
+<true/>
+<key>com.apple.security.network.server</key>
+<true/>
+```
+
+- `network.client` — fetch video from remote origins
+- `network.server` — run the localhost HTTP proxy
+
+### Linux & Windows
+
+No extra manifest or entitlement changes. Ensure the host can reach origin servers and bind/listen on `127.0.0.1`.
+
+### Tips
+
 - **Segment sizing** — for files larger than one segment, pre-cache enough segments (e.g. `cacheSegments: 2` for ~2.4 MB video with 2 MB segments) or rely on on-the-fly proxy downloads.
-
-## Development
-
-Regenerate FRB bindings after changing `rust/src/api/`:
-
-```bash
-flutter_rust_bridge_codegen generate
-```
 
 ## Related
 
