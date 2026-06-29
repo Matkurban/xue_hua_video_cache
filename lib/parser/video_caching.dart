@@ -2,11 +2,12 @@ import 'dart:async';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+import '../src/precache_progress_event.dart';
 import '../src/rust/api/video_caching.dart' as frb;
 
 /// Pre-cache and cache-check API (delegates to Rust).
 class VideoCaching {
-  static Future<StreamController<Map>?> precache(
+  static Future<Stream<PrecacheProgressEvent>?> precache(
     String url, {
     Map<String, Object>? headers,
     int cacheSegments = 2,
@@ -28,7 +29,7 @@ class VideoCaching {
     }
 
     final sink = RustStreamSink<frb.PrecacheProgressInfo>();
-    final controller = StreamController<Map>.broadcast();
+    final controller = StreamController<PrecacheProgressEvent>.broadcast();
 
     unawaited(
       frb
@@ -56,20 +57,9 @@ class VideoCaching {
     sink.stream.listen(
       (info) {
         if (controller.isClosed) return;
-        controller.add({
-          'progress': info.progress,
-          'url': info.url,
-          if (info.startRange != null) 'startRange': info.startRange!.toInt(),
-          if (info.endRange != null) 'endRange': info.endRange!.toInt(),
-          if (info.segmentUrl != null) 'segmentUrl': info.segmentUrl,
-          if (info.parentUrl != null) 'parentUrl': info.parentUrl,
-          if (info.fileName != null) 'fileName': info.fileName,
-          if (info.hlsKey != null) 'hlsKey': info.hlsKey,
-          if (info.totalSegments != null) 'totalSegments': info.totalSegments,
-          if (info.currentSegmentIndex != null)
-            'currentSegmentIndex': info.currentSegmentIndex,
-        });
-        if (info.progress >= 1.0 && !controller.isClosed) {
+        final event = PrecacheProgressEvent.fromInfo(info);
+        controller.add(event);
+        if (event.progress >= 1.0 && !controller.isClosed) {
           controller.close();
         }
       },
@@ -80,7 +70,7 @@ class VideoCaching {
       },
     );
 
-    return controller;
+    return controller.stream;
   }
 
   static Future<bool> isCached(

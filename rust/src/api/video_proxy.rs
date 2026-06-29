@@ -33,13 +33,16 @@ pub async fn video_proxy_init(
 
 #[flutter_rust_bridge::frb]
 pub async fn video_proxy_restart() -> Result<(), String> {
-    let state = crate::proxy::require_state()?;
-    state.restart().await
+    VideoProxyState::get()
+        .ok_or_else(|| "XueHUAEVideoCache.initialize() must be called first".to_string())?
+        .restart()
+        .await
 }
 
 #[flutter_rust_bridge::frb]
 pub async fn video_proxy_is_running() -> Result<bool, String> {
-    let state = crate::proxy::require_state()?;
+    let state = VideoProxyState::get()
+        .ok_or_else(|| "XueHUAEVideoCache.initialize() must be called first".to_string())?;
     Ok(state.is_running().await)
 }
 

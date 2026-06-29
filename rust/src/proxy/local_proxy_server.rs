@@ -8,19 +8,19 @@ use crate::ext::log_ext::{log_d, log_w};
 use crate::ext::socket_ext::append_string;
 use crate::ext::string_ext::to_origin_url;
 use crate::parser::video_caching::VideoCaching;
-use crate::proxy::app_context::AppContext;
+use crate::proxy::proxy_runtime::ProxyRuntime;
 
 pub struct LocalProxyServer {
-    ctx: Arc<AppContext>,
+    runtime: Arc<ProxyRuntime>,
     shutdown: tokio::sync::watch::Sender<bool>,
     handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl LocalProxyServer {
-    pub fn new(ctx: Arc<AppContext>) -> Self {
+    pub fn new(runtime: Arc<ProxyRuntime>) -> Self {
         let (tx, _) = tokio::sync::watch::channel(false);
         Self {
-            ctx,
+            runtime,
             shutdown: tx,
             handle: Mutex::new(None),
         }
@@ -29,19 +29,20 @@ impl LocalProxyServer {
     pub async fn start(&mut self) -> Result<(), std::io::Error> {
         let _ = self.shutdown.send(false);
         let (ip, port) = {
-            let config = self.ctx.config.read();
+            let config = self.runtime.ctx.config.read();
             (config.ip.clone(), config.port)
         };
         let listener = self.bind_with_retry(&ip, port).await?;
         let bound_port = listener.local_addr()?.port();
         {
-            let mut config = self.ctx.config.write();
+            let mut config = self.runtime.ctx.config.write();
             config.port = bound_port;
         }
         log_d(&format!("Proxy server started {ip}:{bound_port}"));
         let shutdown_rx = self.shutdown.subscribe();
+        let runtime = self.runtime.clone();
         let handle = tokio::spawn(async move {
-            Self::run_listener(listener, shutdown_rx).await;
+            Self::run_listener(listener, shutdown_rx, runtime).await;
         });
         *self.handle.lock() = Some(handle);
         Ok(())
@@ -59,14 +60,18 @@ impl LocalProxyServer {
                 Err(e) if e.raw_os_error() == Some(48) || e.raw_os_error() == Some(98) => {
                     log_w(&format!("Port {port} in use, trying next port: {e}"));
                     port = port.saturating_add(1);
-                    self.ctx.config.write().port = port;
+                    self.runtime.ctx.config.write().port = port;
                 }
                 Err(e) => return Err(e),
             }
         }
     }
 
-    async fn run_listener(listener: TcpListener, mut shutdown: tokio::sync::watch::Receiver<bool>) {
+    async fn run_listener(
+        listener: TcpListener,
+        mut shutdown: tokio::sync::watch::Receiver<bool>,
+        runtime: Arc<ProxyRuntime>,
+    ) {
         loop {
             tokio::select! {
                 changed = shutdown.changed() => {
@@ -76,7 +81,8 @@ impl LocalProxyServer {
                 }
                 accept = listener.accept() => {
                     if let Ok((stream, _)) = accept {
-                        tokio::spawn(handle_connection(stream));
+                        let runtime = runtime.clone();
+                        tokio::spawn(handle_connection(stream, runtime));
                     }
                 }
             }
@@ -100,7 +106,7 @@ impl LocalProxyServer {
     }
 }
 
-async fn handle_connection(mut stream: TcpStream) {
+async fn handle_connection(mut stream: TcpStream, runtime: Arc<ProxyRuntime>) {
     let mut buf = vec![0u8; 8192];
     let n = match stream.read(&mut buf).await {
         Ok(n) => n,
@@ -133,5 +139,5 @@ async fn handle_connection(mut stream: TcpStream) {
     log_d(&format!("Proxy request path -> {origin}"));
     let uri =
         url::Url::parse(&origin).unwrap_or_else(|_| url::Url::parse("http://invalid").unwrap());
-    let _ = VideoCaching::parse(stream, uri, headers).await;
+    let _ = VideoCaching::parse(runtime, stream, uri, headers).await;
 }

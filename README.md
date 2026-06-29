@@ -47,6 +47,24 @@ await controller.initialize();
 controller.play();
 ```
 
+### Pre-cache progress
+
+When `progressListen: true`, `precache` returns a typed progress stream:
+
+```dart
+final stream = await XueHuaVideoCache.precache(
+  url,
+  cacheSegments: 2,
+  progressListen: true,
+);
+stream?.listen((PrecacheProgressEvent event) {
+  print('${(event.progress * 100).toStringAsFixed(0)}% ${event.url}');
+});
+```
+
+Range (MP4) events populate `startRange` / `endRange`; HLS events may also include
+`segmentUrl`, `parentUrl`, `hlsKey`, and segment index fields.
+
 ## API overview
 
 | API | Description |

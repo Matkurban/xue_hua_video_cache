@@ -6,7 +6,7 @@ use crate::proxy::video_proxy::VideoProxyState;
 pub fn to_local_url_str(url: String) -> String {
     if let Some(state) = VideoProxyState::get() {
         if !state.is_disposed() {
-            let config = state.ctx.config.read().clone();
+            let config = state.runtime.ctx.config.read().clone();
             return to_local_url(&url, &config);
         }
     }

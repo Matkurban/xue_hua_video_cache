@@ -1,5 +1,6 @@
 pub mod download_manager;
 pub mod download_pool;
+mod download_scheduler;
 pub mod download_status;
 pub mod download_task;
 

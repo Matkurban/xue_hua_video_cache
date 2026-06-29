@@ -1,11 +1,12 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use url::Url;
 
 use crate::ext::string_ext::to_safe_uri;
-use crate::proxy::require_state;
+use crate::proxy::ProxyRuntime;
 
 use super::hls_parser::HlsMasterPlaylist;
 use super::hls_parser::HlsPlaylist;
@@ -17,31 +18,29 @@ use super::url_parser_m3u8::UrlParserM3U8;
 pub struct VideoCaching;
 
 impl VideoCaching {
-    pub async fn parse(stream: TcpStream, uri: Url, headers: HashMap<String, String>) -> bool {
-        let state = match require_state() {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
-        let parser = UrlParserFactory::create_parser(&uri, &state.ctx);
+    pub async fn parse(
+        runtime: Arc<ProxyRuntime>,
+        stream: TcpStream,
+        uri: Url,
+        headers: HashMap<String, String>,
+    ) -> bool {
+        let parser = UrlParserFactory::create_parser(&uri, runtime);
         parser.parse(stream, uri, headers).await
     }
 
     pub async fn is_cached(
+        runtime: Arc<ProxyRuntime>,
         url: &str,
         headers: Option<HashMap<String, String>>,
         cache_segments: usize,
     ) -> bool {
         let uri = to_safe_uri(url);
-        let state = match require_state() {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
-        UrlParserFactory::create_parser(&uri, &state.ctx)
-            .is_cached(url, headers, cache_segments)
-            .await
+        let parser = UrlParserFactory::create_parser(&uri, runtime);
+        parser.is_cached(url, headers, cache_segments).await
     }
 
     pub async fn precache(
+        runtime: Arc<ProxyRuntime>,
         url: &str,
         headers: Option<HashMap<String, String>>,
         cache_segments: usize,
@@ -49,23 +48,23 @@ impl VideoCaching {
         progress_tx: Option<mpsc::UnboundedSender<PrecacheProgress>>,
     ) -> Result<(), String> {
         let uri = to_safe_uri(url);
-        let state = require_state()?;
-        UrlParserFactory::create_parser(&uri, &state.ctx)
+        let parser = UrlParserFactory::create_parser(&uri, runtime);
+        parser
             .precache(url, headers, cache_segments, download_now, progress_tx)
             .await
     }
 
     pub async fn parse_hls_master_playlist(
+        runtime: Arc<ProxyRuntime>,
         url: &str,
         headers: Option<HashMap<String, String>>,
     ) -> Option<HlsMasterPlaylist> {
         let uri = to_safe_uri(url);
-        let state = require_state().ok()?;
-        let parser = UrlParserFactory::create_parser(&uri, &state.ctx);
-        let m3u8 = UrlParserM3U8;
-        if !state.ctx.url_matcher.match_m3u8(&uri)
-            && !state.ctx.url_matcher.match_m3u8_key(&uri)
-            && !state.ctx.url_matcher.match_m3u8_segment(&uri)
+        let parser = UrlParserFactory::create_parser(&uri, runtime.clone());
+        let m3u8 = UrlParserM3U8::new(runtime.clone());
+        if !runtime.ctx.url_matcher.match_m3u8(&uri)
+            && !runtime.ctx.url_matcher.match_m3u8_key(&uri)
+            && !runtime.ctx.url_matcher.match_m3u8_segment(&uri)
         {
             let _ = parser;
             return None;

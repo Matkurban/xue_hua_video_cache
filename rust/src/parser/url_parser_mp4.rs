@@ -9,28 +9,40 @@ use tokio::sync::mpsc;
 use url::Url;
 
 use crate::download::DownloadTask;
+use crate::proxy::ProxyRuntime;
 
+use super::precache_orchestrator::PrecacheOrchestrator;
+use super::range_responder::{RangeParseMode, RangeResponder};
+use super::segment_fetcher::SegmentFetcher;
+use super::segment_resolver::SegmentResolver;
 use super::url_parser::{PrecacheProgress, UrlParser};
-use super::url_parser_common::{RangeParseMode, RangeParserCommon};
 
-pub struct UrlParserMp4;
+pub struct UrlParserMp4 {
+    runtime: Arc<ProxyRuntime>,
+}
+
+impl UrlParserMp4 {
+    pub fn new(runtime: Arc<ProxyRuntime>) -> Self {
+        Self { runtime }
+    }
+}
 
 #[async_trait]
 impl UrlParser for UrlParserMp4 {
     async fn cache(&self, task: &DownloadTask) -> Option<Bytes> {
-        RangeParserCommon::cache(task).await
+        SegmentResolver::resolve(&self.runtime, task).await
     }
 
     async fn download(&self, task: Arc<Mutex<DownloadTask>>) -> Option<Bytes> {
-        RangeParserCommon::download(task).await
+        SegmentFetcher::download(&self.runtime, task).await
     }
 
     async fn push(&self, task: Arc<Mutex<DownloadTask>>) {
-        let _ = RangeParserCommon::push(task).await;
+        let _ = SegmentFetcher::push(&self.runtime, task).await;
     }
 
     async fn parse(&self, stream: TcpStream, uri: Url, headers: HashMap<String, String>) -> bool {
-        RangeParserCommon::parse(stream, uri, headers, RangeParseMode::Mp4).await
+        RangeResponder::respond(&self.runtime, stream, uri, headers, RangeParseMode::Mp4).await
     }
 
     async fn is_cached(
@@ -39,7 +51,7 @@ impl UrlParser for UrlParserMp4 {
         headers: Option<HashMap<String, String>>,
         cache_segments: usize,
     ) -> bool {
-        RangeParserCommon::is_cached(url, headers, cache_segments).await
+        PrecacheOrchestrator::is_cached(&self.runtime, url, headers, cache_segments).await
     }
 
     async fn precache(
@@ -50,6 +62,14 @@ impl UrlParser for UrlParserMp4 {
         download_now: bool,
         progress_tx: Option<mpsc::UnboundedSender<PrecacheProgress>>,
     ) -> Result<(), String> {
-        RangeParserCommon::precache(url, headers, cache_segments, download_now, progress_tx).await
+        PrecacheOrchestrator::precache(
+            &self.runtime,
+            url,
+            headers,
+            cache_segments,
+            download_now,
+            progress_tx,
+        )
+        .await
     }
 }

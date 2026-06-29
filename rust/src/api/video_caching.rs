@@ -2,9 +2,10 @@ use std::collections::HashMap;
 
 use crate::frb_generated::StreamSink;
 
-use crate::cache::LruCacheSingleton;
+use crate::cache::cache_removal;
 use crate::parser::PrecacheProgress;
 use crate::parser::video_caching::VideoCaching;
+use crate::proxy::require_runtime;
 
 #[flutter_rust_bridge::frb]
 #[derive(Debug, Clone)]
@@ -53,7 +54,7 @@ pub async fn video_caching_precache(
     progress_listen: bool,
     sink: Option<StreamSink<PrecacheProgressInfo>>,
 ) -> Result<(), String> {
-    let _state = crate::proxy::require_state()?;
+    let runtime = require_runtime()?;
     let progress_tx = if progress_listen {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         if let Some(sink) = sink {
@@ -70,6 +71,7 @@ pub async fn video_caching_precache(
         None
     };
     VideoCaching::precache(
+        runtime,
         &url,
         headers,
         cache_segments.max(0) as usize,
@@ -85,13 +87,8 @@ pub async fn video_caching_is_cached(
     headers: Option<HashMap<String, String>>,
     cache_segments: i32,
 ) -> Result<bool, String> {
-    let Some(state) = crate::proxy::video_proxy::VideoProxyState::get() else {
-        return Ok(false);
-    };
-    if state.is_disposed() {
-        return Ok(false);
-    }
-    Ok(VideoCaching::is_cached(&url, headers, cache_segments.max(0) as usize).await)
+    let runtime = require_runtime()?;
+    Ok(VideoCaching::is_cached(runtime, &url, headers, cache_segments.max(0) as usize).await)
 }
 
 #[flutter_rust_bridge::frb]
@@ -99,17 +96,20 @@ pub async fn video_caching_parse_hls_master_playlist(
     url: String,
     headers: Option<HashMap<String, String>>,
 ) -> Result<Option<HlsMasterPlaylistInfo>, String> {
-    let _state = crate::proxy::require_state()?;
-    Ok(VideoCaching::parse_hls_master_playlist(&url, headers)
-        .await
-        .map(|m| HlsMasterPlaylistInfo {
-            media_playlist_urls: m.media_playlist_urls,
-        }))
+    let runtime = require_runtime()?;
+    Ok(
+        VideoCaching::parse_hls_master_playlist(runtime, &url, headers)
+            .await
+            .map(|m| HlsMasterPlaylistInfo {
+                media_playlist_urls: m.media_playlist_urls,
+            }),
+    )
 }
 
 #[flutter_rust_bridge::frb]
 pub async fn lru_remove_cache_by_url(url: String, single_file: bool) -> Result<(), String> {
-    LruCacheSingleton::instance()
-        .remove_cache_by_url(&url, single_file)
-        .await
+    let runtime = require_runtime()?;
+    let config = runtime.ctx.config.read().clone();
+    let matcher = runtime.ctx.url_matcher.as_ref();
+    cache_removal::remove_cache_by_url(&runtime.cache, &url, single_file, &config, matcher).await
 }

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use async_recursion::async_recursion;
 use bytes::Bytes;
 use parking_lot::Mutex;
 use reqwest::Client;
@@ -9,8 +8,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast;
 
 use crate::cache::LruCacheSingleton;
+use crate::cache::cache_key::{CacheKey, CacheKeyContext};
 use crate::ext::file_ext::FileExt;
-use crate::ext::gesture_ext::FunctionProxy;
 use crate::ext::log_ext::log_v;
 use crate::proxy::app_context::AppContext;
 
@@ -22,15 +21,16 @@ pub const MAX_TASK_PRIORITY: i32 = 9999;
 pub const MIN_PROGRESS_UPDATE_INTERVAL: u64 = 500;
 
 pub struct DownloadPool {
-    pool_size: usize,
-    tasks: Mutex<Vec<Arc<Mutex<DownloadTask>>>>,
+    pub(crate) pool_size: usize,
+    pub(crate) tasks: Mutex<Vec<Arc<Mutex<DownloadTask>>>>,
     client: Client,
-    tx: broadcast::Sender<Arc<Mutex<DownloadTask>>>,
+    pub(crate) tx: broadcast::Sender<Arc<Mutex<DownloadTask>>>,
     pub(crate) ctx: Arc<AppContext>,
+    cache: Arc<LruCacheSingleton>,
 }
 
 impl DownloadPool {
-    pub fn new(pool_size: usize, ctx: Arc<AppContext>) -> Self {
+    pub fn new(pool_size: usize, ctx: Arc<AppContext>, cache: Arc<LruCacheSingleton>) -> Self {
         assert!(pool_size > 0, "Pool size must be greater than 0");
         let (tx, _) = broadcast::channel(1024);
         Self {
@@ -39,6 +39,7 @@ impl DownloadPool {
             client: ctx.http_client.clone(),
             tx,
             ctx,
+            cache,
         }
     }
 
@@ -66,7 +67,7 @@ impl DownloadPool {
         }
     }
 
-    fn cancel_tasks(tasks: &[Arc<Mutex<DownloadTask>>]) {
+    pub(crate) fn cancel_tasks(tasks: &[Arc<Mutex<DownloadTask>>]) {
         for task in tasks {
             Self::cancel_task_worker(task);
         }
@@ -90,59 +91,6 @@ impl DownloadPool {
         }
         self.tasks.lock().push(task.clone());
         task
-    }
-
-    pub async fn execute_task(self: &Arc<Self>, task: Arc<Mutex<DownloadTask>>) {
-        let config = self.ctx.config.read().clone();
-        let matcher = self.ctx.url_matcher.as_ref();
-        let match_url = task.lock().match_url(&config, matcher);
-
-        let removed = {
-            let mut tasks = self.tasks.lock();
-            let replace = tasks.iter().any(|e| {
-                e.lock().match_url(&config, matcher) == match_url
-                    && e.lock().priority < task.lock().priority
-            });
-            if replace {
-                let removed: Vec<_> = tasks
-                    .iter()
-                    .filter(|e| e.lock().match_url(&config, matcher) == match_url)
-                    .cloned()
-                    .collect();
-                tasks.retain(|e| e.lock().match_url(&config, matcher) != match_url);
-                Some(removed)
-            } else {
-                None
-            }
-        };
-        if let Some(removed) = removed {
-            Self::cancel_tasks(&removed);
-        }
-
-        let already_exists = self
-            .tasks
-            .lock()
-            .iter()
-            .any(|e| e.lock().match_url(&config, matcher) == match_url);
-        if !already_exists {
-            self.add_task(task.clone()).await;
-        }
-
-        let pool = Arc::clone(self);
-        FunctionProxy::debounce(
-            move || {
-                let pool = pool.clone();
-                tokio::spawn(async move {
-                    run_download_pool_round(pool).await;
-                });
-            },
-            Some("roundTask"),
-            500,
-        );
-    }
-
-    pub async fn round_task(self: &Arc<Self>) {
-        run_download_pool_round(Arc::clone(self)).await;
     }
 
     pub fn update_task_by_id(&self, task_id: &str, status: DownloadStatus) {
@@ -204,49 +152,7 @@ impl DownloadPool {
     }
 }
 
-#[async_recursion]
-async fn run_download_pool_round(pool: Arc<DownloadPool>) {
-    let mut tasks = pool.tasks.lock();
-    if tasks.is_empty() {
-        return;
-    }
-    tasks.sort_by(|a, b| b.lock().priority.cmp(&a.lock().priority));
-    for task in tasks.iter().skip(pool.pool_size) {
-        let mut t = task.lock();
-        if t.status == DownloadStatus::Downloading {
-            t.status = DownloadStatus::Paused;
-            drop(t);
-            let _ = pool.tx.send(task.clone());
-        }
-    }
-    drop(tasks);
-    let list = pool.tasks.lock().clone();
-    for task in list {
-        let downloading = pool.downloading_tasks().len();
-        if downloading >= pool.pool_size {
-            break;
-        }
-        {
-            let mut t = task.lock();
-            match t.status {
-                DownloadStatus::Idle | DownloadStatus::Paused => {}
-                DownloadStatus::Downloading => continue,
-                _ => continue,
-            }
-            if t.retry_times == 0 && t.status == DownloadStatus::Idle {
-                t.retry_times = 3;
-            }
-            t.status = DownloadStatus::Downloading;
-        }
-        let _ = pool.tx.send(task.clone());
-        let pool2 = pool.clone();
-        tokio::spawn(async move {
-            run_pool_download(pool2, task).await;
-        });
-    }
-}
-
-async fn run_pool_download(pool: Arc<DownloadPool>, task: Arc<Mutex<DownloadTask>>) {
+pub(crate) async fn run_pool_download(pool: Arc<DownloadPool>, task: Arc<Mutex<DownloadTask>>) {
     use futures_util::StreamExt;
 
     let task_id = task.lock().id.clone();
@@ -259,21 +165,20 @@ async fn run_pool_download(pool: Arc<DownloadPool>, task: Arc<Mutex<DownloadTask
         if t.cancel_token.is_none() {
             t.cancel_token = Some(tokio_util::sync::CancellationToken::new());
         }
+        let config = pool.ctx.config.read().clone();
+        let matcher = pool.ctx.url_matcher.as_ref();
+        let ctx = CacheKeyContext::new(config, matcher);
+        let key = CacheKey::for_task(&t, &ctx);
         if t.cached_bytes == 0 {
-            if let Ok(meta) = std::fs::metadata(format!(
-                "{}.tmp",
-                t.save_path(&pool.ctx.config.read(), pool.ctx.url_matcher.as_ref(),)
-            )) {
+            if let Ok(meta) = std::fs::metadata(format!("{}.tmp", key.save_path(&t))) {
                 t.cached_bytes = meta.len() as i64;
             }
         }
         let append = t.cached_bytes > 0;
         let url = t.url();
-        let config = pool.ctx.config.read().clone();
-        let matcher = pool.ctx.url_matcher.as_ref();
-        let save_path = t.save_path(&config, matcher);
+        let save_path = key.save_path(&t);
         let tmp_path = format!("{save_path}.tmp");
-        let match_key = t.match_url(&config, matcher);
+        let match_key = key.entry;
         let headers = DownloadPool::download_header(&t);
         (url, tmp_path, save_path, headers, append, match_key)
     };
@@ -469,25 +374,14 @@ async fn finish_pool_download(
         t.status = DownloadStatus::Completed;
     }
     let _ = pool.tx.send(task.clone());
-    let singleton = LruCacheSingleton::instance();
-    singleton
+    pool.cache
         .memory_put(match_key, Bytes::from(data.clone()))
         .await;
-    singleton
+    pool.cache
         .storage_put(match_key, std::path::PathBuf::from(save_path))
         .await;
     pool.tasks.lock().retain(|x| x.lock().id != task.lock().id);
-    let pool2 = Arc::clone(&pool);
-    FunctionProxy::debounce(
-        move || {
-            let pool2 = pool2.clone();
-            tokio::spawn(async move {
-                run_download_pool_round(pool2).await;
-            });
-        },
-        Some("roundTask"),
-        500,
-    );
+    pool.schedule_round_debounced();
 }
 
 async fn fail_pool_download(pool: &Arc<DownloadPool>, task: Arc<Mutex<DownloadTask>>) {
@@ -513,17 +407,7 @@ async fn fail_pool_download(pool: &Arc<DownloadPool>, task: Arc<Mutex<DownloadTa
     if task.lock().status == DownloadStatus::Failed {
         pool.tasks.lock().retain(|x| x.lock().id != task_id);
     }
-    let pool2 = Arc::clone(pool);
-    FunctionProxy::debounce(
-        move || {
-            let pool2 = pool2.clone();
-            tokio::spawn(async move {
-                run_download_pool_round(pool2).await;
-            });
-        },
-        Some("roundTask"),
-        500,
-    );
+    pool.schedule_round_debounced();
 }
 
 #[cfg(test)]
@@ -533,6 +417,7 @@ mod tests {
     use parking_lot::Mutex;
     use url::Url;
 
+    use crate::cache::LruCacheSingleton;
     use crate::global::CacheKeyConfig;
     use crate::proxy::PlatformKind;
     use crate::proxy::app_context::AppContext;
@@ -546,9 +431,13 @@ mod tests {
         ))
     }
 
+    fn test_cache() -> Arc<LruCacheSingleton> {
+        LruCacheSingleton::instance()
+    }
+
     #[tokio::test]
     async fn add_task_increases_task_list() {
-        let pool = DownloadPool::new(1, test_ctx());
+        let pool = DownloadPool::new(1, test_ctx(), test_cache());
         let uri = Url::parse("https://example.com/1.mp4").unwrap();
         let task = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
         pool.add_task(task).await;
@@ -557,33 +446,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_task_replaces_lower_priority_without_download() {
-        let pool = Arc::new(DownloadPool::new(1, test_ctx()));
-        let uri = Url::parse("https://example.com/3.mp4").unwrap();
-        let t1 = Arc::new(Mutex::new(DownloadTask::new(uri.clone(), None)));
-        t1.lock().priority = 1;
-        let t2 = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
-        t2.lock().priority = 5;
-        pool.add_task(t1).await;
-        {
-            let match_url = t2
-                .lock()
-                .match_url(&pool.ctx.config.read(), pool.ctx.url_matcher.as_ref());
-            pool.tasks.lock().retain(|e| {
-                e.lock()
-                    .match_url(&pool.ctx.config.read(), pool.ctx.url_matcher.as_ref())
-                    != match_url
-            });
-            pool.add_task(t2.clone()).await;
-        }
-        assert_eq!(pool.task_list().len(), 1);
-        assert_eq!(pool.task_list()[0].lock().priority, 5);
-        pool.dispose();
-    }
-
-    #[tokio::test]
     async fn resume_sets_idle_so_scheduler_can_claim_task() {
-        let pool = Arc::new(DownloadPool::new(1, test_ctx()));
+        let pool = Arc::new(DownloadPool::new(1, test_ctx(), test_cache()));
         let uri = Url::parse("https://example.com/resume.mp4").unwrap();
         let task = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
         pool.add_task(task.clone()).await;
@@ -610,7 +474,7 @@ mod tests {
 
     #[tokio::test]
     async fn remove_tasks_by_ids_cancels_worker_token() {
-        let pool = DownloadPool::new(1, test_ctx());
+        let pool = DownloadPool::new(1, test_ctx(), test_cache());
         let uri = Url::parse("https://example.com/cancel.mp4").unwrap();
         let task = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
         task.lock().cancel_token = Some(tokio_util::sync::CancellationToken::new());
@@ -625,7 +489,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_task_by_id_keeps_cancelled_status() {
-        let pool = Arc::new(DownloadPool::new(1, test_ctx()));
+        let pool = Arc::new(DownloadPool::new(1, test_ctx(), test_cache()));
         let uri = Url::parse("https://example.com/cancel2.mp4").unwrap();
         let task = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
         task.lock().cancel_token = Some(tokio_util::sync::CancellationToken::new());

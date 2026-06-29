@@ -7,7 +7,6 @@ use tokio::sync::OnceCell as AsyncOnceCell;
 
 use crate::ext::file_ext::FileExt;
 use crate::ext::int_ext::to_memory_size;
-use crate::ext::string_ext::generate_md5;
 use crate::global::Config;
 
 use super::lru_cache::LruCache;
@@ -137,49 +136,6 @@ impl LruCacheSingleton {
             })
             .await;
     }
-
-    pub async fn remove_cache_by_url(&self, url: &str, single_file: bool) -> Result<(), String> {
-        let key = generate_md5(url);
-        self.storage_init().await;
-        if single_file {
-            self.storage.remove(&key).await;
-            self.memory.remove(&key).await;
-            return Ok(());
-        }
-        let root = FileExt::create_cache_path(None)
-            .await
-            .map_err(|e| e.to_string())?;
-        let mut entries = tokio::fs::read_dir(&root)
-            .await
-            .map_err(|e| e.to_string())?;
-        while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
-            let path = entry.path();
-            if path.is_dir() {
-                if path.file_name().and_then(|n| n.to_str()) == Some(&key) {
-                    Self::remove_dir_recursive(&self, &path).await;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    async fn remove_dir_recursive(singleton: &LruCacheSingleton, dir: &PathBuf) {
-        let mut stack = vec![dir.clone()];
-        while let Some(d) = stack.pop() {
-            if let Ok(mut entries) = tokio::fs::read_dir(&d).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let p = entry.path();
-                    if p.is_dir() {
-                        stack.push(p);
-                    } else if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
-                        singleton.storage.remove(&stem.to_string()).await;
-                        singleton.memory.remove(&stem.to_string()).await;
-                    }
-                }
-            }
-            let _ = tokio::fs::remove_dir_all(&d).await;
-        }
-    }
 }
 
 #[cfg(test)]
@@ -206,6 +162,9 @@ mod singleton_tests {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         let singleton = LruCacheSingleton::instance();
         singleton.memory_clear().await;
+        // Re-apply after clear: parallel init tests may call reconfigure on the global singleton.
+        LruCacheSingleton::reconfigure(50, 1_000_000_000);
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         singleton
             .memory_put("a", Bytes::from_static(&[0; 30]))
             .await;

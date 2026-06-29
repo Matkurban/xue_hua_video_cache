@@ -3,18 +3,61 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
-import '../cache/lru_cache_singleton.dart';
-import '../download/download_manager.dart';
 import '../parser/video_caching.dart';
+import 'download_task.dart';
+import 'precache_progress_event.dart';
+import 'rust/api/download_manager.dart' as frb_dm;
+import 'rust/api/video_caching.dart' as frb_vc;
 import 'rust/api/video_proxy.dart' as frb;
 import 'rust/frb_generated.dart';
 import 'rust/global/cache_key_config.dart';
 import 'rust/proxy/platform_kind.dart';
 
+/// Forwards download pool control to the Rust backend.
+class _DownloadBridge {
+  Stream<DownloadTask> get stream =>
+      frb_dm.downloadManagerSubscribe().map(DownloadTask.fromInfo);
+
+  Future<List<DownloadTask>> get allTasks async =>
+      (await frb_dm.downloadManagerAllTasks())
+          .map(DownloadTask.fromInfo)
+          .toList();
+
+  Future<List<DownloadTask>> get downloadingTasks async =>
+      (await frb_dm.downloadManagerDownloadingTasks())
+          .map(DownloadTask.fromInfo)
+          .toList();
+
+  Future<void> pauseTaskById(String taskId) =>
+      frb_dm.downloadManagerPauseTaskById(taskId: taskId);
+
+  Future<void> resumeTaskById(String taskId) =>
+      frb_dm.downloadManagerResumeTaskById(taskId: taskId);
+
+  Future<void> cancelTaskById(String taskId) =>
+      frb_dm.downloadManagerCancelTaskById(taskId: taskId);
+
+  Future<void> cancelTaskByUrl(String url) =>
+      frb_dm.downloadManagerCancelTaskByUrl(url: url);
+
+  Future<void> pauseTaskByUrl(String url) =>
+      frb_dm.downloadManagerPauseTaskByUrl(url: url);
+
+  Future<void> resumeTaskByUrl(String url) =>
+      frb_dm.downloadManagerResumeTaskByUrl(url: url);
+
+  Future<void> pauseAllTasks() => frb_dm.downloadManagerPauseAllTasks();
+
+  Future<void> cancelAllTasks() => frb_dm.downloadManagerCancelAllTasks();
+
+  Future<void> cancelTaskAboutUrl(String url) =>
+      frb_dm.downloadManagerCancelTaskAboutUrl(url: url);
+}
+
 /// Unified plugin entry for local video proxy and caching (Rust backend).
 class XueHuaVideoCache {
   static bool _initialized = false;
-  static late DownloadManager _downloadManager;
+  static late _DownloadBridge _download;
 
   static Future<void> initialize({
     String? ip,
@@ -46,7 +89,7 @@ class XueHuaVideoCache {
       platform: _platformKind(),
       cacheKeyConfig: CacheKeyConfig(ignoreQueryKeys: ignoreQueryKeys),
     );
-    _downloadManager = DownloadManager();
+    _download = _DownloadBridge();
     _initialized = true;
   }
 
@@ -64,7 +107,7 @@ class XueHuaVideoCache {
         'XueHUAEVideoCache.initialize() must be called before restart()',
       );
     }
-    _downloadManager = DownloadManager();
+    _download = _DownloadBridge();
     await frb.videoProxyRestart();
   }
 
@@ -85,74 +128,67 @@ class XueHuaVideoCache {
     _initialized = false;
   }
 
-  static Future<StreamController<Map>?> precache(
+  static Future<Stream<PrecacheProgressEvent>?> precache(
     String url, {
     Map<String, Object>? headers,
     int cacheSegments = 2,
     bool downloadNow = true,
     bool progressListen = false,
-  }) =>
-      VideoCaching.precache(
-        url,
-        headers: headers,
-        cacheSegments: cacheSegments,
-        downloadNow: downloadNow,
-        progressListen: progressListen,
-      );
+  }) => VideoCaching.precache(
+    url,
+    headers: headers,
+    cacheSegments: cacheSegments,
+    downloadNow: downloadNow,
+    progressListen: progressListen,
+  );
 
   static Future<bool> isCached(
     String url, {
     Map<String, Object>? headers,
     int cacheSegments = 2,
-  }) =>
-      VideoCaching.isCached(
-        url,
-        headers: headers,
-        cacheSegments: cacheSegments,
-      );
+  }) => VideoCaching.isCached(
+    url,
+    headers: headers,
+    cacheSegments: cacheSegments,
+  );
 
   static Future<HlsMasterPlaylist?> parseHlsMasterPlaylist(
     String url, {
     Map<String, Object>? headers,
-  }) =>
-      VideoCaching.parseHlsMasterPlaylist(url, headers: headers);
+  }) => VideoCaching.parseHlsMasterPlaylist(url, headers: headers);
 
-  static Future<void> removeCacheByUrl(
-    String url, {
-    bool singleFile = false,
-  }) =>
-      LruCacheSingleton().removeCacheByUrl(url, singleFile: singleFile);
+  static Future<void> removeCacheByUrl(String url, {bool singleFile = false}) =>
+      frb_vc.lruRemoveCacheByUrl(url: url, singleFile: singleFile);
 
-  static Stream<DownloadTask> get downloadStream => _downloadManager.stream;
+  static Stream<DownloadTask> get downloadStream => _download.stream;
 
-  static Future<List<DownloadTask>> allDownloadTasks() =>
-      _downloadManager.allTasks;
+  static Future<List<DownloadTask>> allDownloadTasks() => _download.allTasks;
 
   static Future<List<DownloadTask>> downloadingTasks() =>
-      _downloadManager.downloadingTasks;
+      _download.downloadingTasks;
 
   static Future<void> pauseTaskById(String taskId) =>
-      _downloadManager.pauseTaskById(taskId);
+      _download.pauseTaskById(taskId);
 
   static Future<void> resumeTaskById(String taskId) =>
-      _downloadManager.resumeTaskById(taskId);
+      _download.resumeTaskById(taskId);
 
   static Future<void> cancelTaskById(String taskId) =>
-      _downloadManager.cancelTaskById(taskId);
+      _download.cancelTaskById(taskId);
 
   static Future<void> cancelTaskByUrl(String url) =>
-      _downloadManager.cancelTaskByUrl(url);
+      _download.cancelTaskByUrl(url);
 
   static Future<void> pauseTaskByUrl(String url) =>
-      _downloadManager.pauseTaskByUrl(url);
+      _download.pauseTaskByUrl(url);
 
   static Future<void> resumeTaskByUrl(String url) =>
-      _downloadManager.resumeTaskByUrl(url);
+      _download.resumeTaskByUrl(url);
 
-  static Future<void> pauseAllTasks() => _downloadManager.pauseAllTasks();
+  static Future<void> pauseAllTasks() => _download.pauseAllTasks();
 
-  static Future<void> cancelAllTasks() => _downloadManager.cancelAllTask();
+  static Future<void> cancelAllTasks() => _download.cancelAllTasks();
 
   static Future<void> cancelTaskAboutUrl(String url) =>
-      _downloadManager.cancelTaskAboutUrl(url);
+      _download.cancelTaskAboutUrl(url);
 }

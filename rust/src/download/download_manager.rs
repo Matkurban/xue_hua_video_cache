@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
+use crate::cache::LruCacheSingleton;
+use crate::cache::cache_key::{CacheKey, CacheKeyContext};
 use crate::ext::string_ext::generate_md5;
 use crate::proxy::app_context::AppContext;
 
@@ -14,9 +16,9 @@ pub struct DownloadManager {
 }
 
 impl DownloadManager {
-    pub fn new(max_concurrent: usize, ctx: Arc<AppContext>) -> Self {
+    pub fn new(max_concurrent: usize, ctx: Arc<AppContext>, cache: Arc<LruCacheSingleton>) -> Self {
         Self {
-            pool: Arc::new(DownloadPool::new(max_concurrent.max(1), ctx)),
+            pool: Arc::new(DownloadPool::new(max_concurrent.max(1), ctx, cache)),
         }
     }
 
@@ -32,12 +34,8 @@ impl DownloadManager {
         self.pool.add_task(task).await;
     }
 
-    pub async fn execute_task(&self, task: Arc<Mutex<DownloadTask>>) {
-        self.pool.execute_task(task).await;
-    }
-
-    pub async fn round_task(&self) {
-        self.pool.round_task().await;
+    pub async fn submit(&self, task: Arc<Mutex<DownloadTask>>) {
+        self.pool.submit(task).await;
     }
 
     pub fn pause_task_by_id(&self, id: &str) {
@@ -98,29 +96,25 @@ impl DownloadManager {
     }
 
     pub fn is_task_exist(&self, task: &DownloadTask) -> bool {
-        let match_url = task.match_url(
-            &self.pool.ctx.config.read(),
-            self.pool.ctx.url_matcher.as_ref(),
-        );
-        self.pool.task_list().iter().any(|t| {
-            t.lock().match_url(
-                &self.pool.ctx.config.read(),
-                self.pool.ctx.url_matcher.as_ref(),
-            ) == match_url
-        })
+        let config = self.pool.ctx.config.read().clone();
+        let matcher = self.pool.ctx.url_matcher.as_ref();
+        let ctx = CacheKeyContext::new(config, matcher);
+        let entry = CacheKey::for_task(task, &ctx).entry;
+        self.pool
+            .task_list()
+            .iter()
+            .any(|t| ctx.entry_matches(&t.lock(), &entry))
     }
 
     pub fn is_url_downloading(&self, task: &DownloadTask) -> bool {
-        let match_url = task.match_url(
-            &self.pool.ctx.config.read(),
-            self.pool.ctx.url_matcher.as_ref(),
-        );
-        self.pool.downloading_tasks().iter().any(|t| {
-            t.lock().match_url(
-                &self.pool.ctx.config.read(),
-                self.pool.ctx.url_matcher.as_ref(),
-            ) == match_url
-        })
+        let config = self.pool.ctx.config.read().clone();
+        let matcher = self.pool.ctx.url_matcher.as_ref();
+        let ctx = CacheKeyContext::new(config, matcher);
+        let entry = CacheKey::for_task(task, &ctx).entry;
+        self.pool
+            .downloading_tasks()
+            .iter()
+            .any(|t| ctx.entry_matches(&t.lock(), &entry))
     }
 
     pub fn resume_task_by_id(&self, id: &str) {
@@ -133,7 +127,7 @@ impl DownloadManager {
             task.lock().status = DownloadStatus::Idle;
             let pool = self.pool.clone();
             tokio::spawn(async move {
-                pool.execute_task(task).await;
+                pool.submit(task).await;
             });
         }
     }

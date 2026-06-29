@@ -6,10 +6,6 @@ use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-use crate::ext::string_ext::{generate_md5, to_safe_uri};
-use crate::global::Config;
-use crate::matchers::UrlMatcher;
-
 use super::download_status::DownloadStatus;
 
 static AUTO_ID: AtomicU64 = AtomicU64::new(1);
@@ -68,63 +64,6 @@ impl DownloadTask {
 
     pub fn url(&self) -> String {
         self.uri.to_string()
-    }
-
-    pub fn match_url(&self, config: &Config, matcher: &dyn UrlMatcher) -> String {
-        let cache_key = config.custom_cache_id.to_lowercase();
-        let headers = self.headers.clone().unwrap_or_default();
-        let headers: HashMap<String, String> = headers
-            .into_iter()
-            .map(|(k, v)| (k.to_lowercase(), v))
-            .collect();
-        let mut safe_uri = to_safe_uri(&self.file_name);
-        if let Some(host) = headers.get(&cache_key) {
-            safe_uri.set_host(Some(host)).ok();
-        }
-        let mut query: HashMap<String, String> = safe_uri
-            .query_pairs()
-            .map(|(k, v)| (k.into_owned(), v.into_owned()))
-            .collect();
-        if self.start_range > 0 {
-            query
-                .entry("startRange".to_string())
-                .or_insert_with(|| self.start_range.to_string());
-        }
-        if let Some(end) = self.end_range {
-            query
-                .entry("startRange".to_string())
-                .or_insert_with(|| "0".to_string());
-            query.insert("endRange".to_string(), end.to_string());
-        }
-        let q: String = query
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join("&");
-        safe_uri.set_query(if q.is_empty() { None } else { Some(&q) });
-        let cache_uri = matcher.match_cache_key(&safe_uri);
-        generate_md5(&cache_uri.to_string())
-    }
-
-    pub fn save_file_name(&self, config: &Config, matcher: &dyn UrlMatcher) -> String {
-        let match_url = self.match_url(config, matcher);
-        let extension = self.file_name.rsplit('.').next().unwrap_or("bin");
-        if let Ok(uri) = Url::parse(&self.file_name) {
-            if let Some(last) = uri.path_segments().and_then(|mut s| s.next_back()) {
-                if let Some(ext) = last.rsplit('.').next() {
-                    return format!("{match_url}.{ext}");
-                }
-            }
-        }
-        format!("{match_url}.{extension}")
-    }
-
-    pub fn save_path(&self, config: &Config, matcher: &dyn UrlMatcher) -> String {
-        format!(
-            "{}/{}",
-            self.cache_dir,
-            self.save_file_name(config, matcher)
-        )
     }
 
     pub fn reset(&mut self) {

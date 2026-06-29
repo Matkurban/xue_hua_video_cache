@@ -47,6 +47,24 @@ await controller.initialize();
 controller.play();
 ```
 
+### 预缓存进度
+
+`progressListen: true` 时，`precache` 返回类型化的进度流：
+
+```dart
+final stream = await XueHuaVideoCache.precache(
+  url,
+  cacheSegments: 2,
+  progressListen: true,
+);
+stream?.listen((PrecacheProgressEvent event) {
+  print('${(event.progress * 100).toStringAsFixed(0)}% ${event.url}');
+});
+```
+
+Range（MP4）事件会填充 `startRange` / `endRange`；HLS 事件还可能包含
+`segmentUrl`、`parentUrl`、`hlsKey` 及分段索引字段。
+
 ## API 概览
 
 | API | 说明 |

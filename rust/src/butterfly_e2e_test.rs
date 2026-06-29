@@ -16,10 +16,13 @@ mod tests {
 
     const WAIT_CACHED_TIMEOUT: Duration = Duration::from_secs(45);
 
-    async fn wait_cached(segments: usize) -> bool {
+    async fn wait_cached(
+        runtime: std::sync::Arc<crate::proxy::ProxyRuntime>,
+        segments: usize,
+    ) -> bool {
         let deadline = tokio::time::Instant::now() + WAIT_CACHED_TIMEOUT;
         while tokio::time::Instant::now() < deadline {
-            if VideoCaching::is_cached(BUTTERFLY_MP4, None, segments).await {
+            if VideoCaching::is_cached(runtime.clone(), BUTTERFLY_MP4, None, segments).await {
                 return true;
             }
             tokio::time::sleep(Duration::from_millis(400)).await;
@@ -51,24 +54,25 @@ mod tests {
         .expect("init");
 
         let state = VideoProxyState::get().expect("state");
+        let runtime = state.runtime.clone();
         assert!(state.is_running().await);
 
         assert!(
-            !VideoCaching::is_cached(BUTTERFLY_MP4, None, 2).await,
+            !VideoCaching::is_cached(runtime.clone(), BUTTERFLY_MP4, None, 2).await,
             "should not be cached before precache"
         );
 
-        VideoCaching::precache(BUTTERFLY_MP4, None, 2, true, None)
+        VideoCaching::precache(runtime.clone(), BUTTERFLY_MP4, None, 2, true, None)
             .await
             .expect("precache");
 
         assert!(
-            wait_cached(2).await,
+            wait_cached(runtime.clone(), 2).await,
             "timed out waiting for butterfly.mp4 segments"
         );
 
         let (ip, port) = {
-            let cfg = state.ctx.config.read();
+            let cfg = runtime.ctx.config.read();
             (cfg.ip.clone(), cfg.port)
         };
 

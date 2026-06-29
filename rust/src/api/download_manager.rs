@@ -4,7 +4,7 @@ use crate::frb_generated::StreamSink;
 use parking_lot::Mutex;
 
 use crate::download::{DownloadStatus, DownloadTask};
-use crate::proxy::require_state;
+use crate::proxy::require_runtime;
 
 #[flutter_rust_bridge::frb]
 #[derive(Debug, Clone)]
@@ -40,8 +40,8 @@ fn tasks_to_info(tasks: Vec<Arc<Mutex<DownloadTask>>>) -> Vec<DownloadTaskInfo> 
 
 #[flutter_rust_bridge::frb]
 pub async fn download_manager_subscribe(sink: StreamSink<DownloadTaskInfo>) -> Result<(), String> {
-    let state = require_state()?;
-    let mut rx = state.download_manager().subscribe();
+    let runtime = require_runtime()?;
+    let mut rx = runtime.downloads().subscribe();
     tokio::spawn(async move {
         loop {
             match rx.recv().await {
@@ -61,75 +61,75 @@ pub async fn download_manager_subscribe(sink: StreamSink<DownloadTaskInfo>) -> R
 
 #[flutter_rust_bridge::frb]
 pub fn download_manager_all_tasks() -> Result<Vec<DownloadTaskInfo>, String> {
-    let state = require_state()?;
-    Ok(tasks_to_info(state.download_manager().task_list()))
+    let runtime = require_runtime()?;
+    Ok(tasks_to_info(runtime.downloads().task_list()))
 }
 
 #[flutter_rust_bridge::frb]
 pub fn download_manager_downloading_tasks() -> Result<Vec<DownloadTaskInfo>, String> {
-    let state = require_state()?;
-    Ok(tasks_to_info(state.download_manager().downloading_tasks()))
+    let runtime = require_runtime()?;
+    Ok(tasks_to_info(runtime.downloads().downloading_tasks()))
 }
 
 #[flutter_rust_bridge::frb]
 pub fn download_manager_pause_task_by_id(task_id: String) -> Result<(), String> {
-    let state = require_state()?;
-    state.download_manager().pause_task_by_id(&task_id);
+    let runtime = require_runtime()?;
+    runtime.downloads().pause_task_by_id(&task_id);
     Ok(())
 }
 
 #[flutter_rust_bridge::frb]
 pub fn download_manager_resume_task_by_id(task_id: String) -> Result<(), String> {
-    let state = require_state()?;
-    state.download_manager().resume_task_by_id(&task_id);
+    let runtime = require_runtime()?;
+    runtime.downloads().resume_task_by_id(&task_id);
     Ok(())
 }
 
 #[flutter_rust_bridge::frb]
 pub fn download_manager_cancel_task_by_id(task_id: String) -> Result<(), String> {
-    let state = require_state()?;
-    state.download_manager().cancel_task_by_id(&task_id);
+    let runtime = require_runtime()?;
+    runtime.downloads().cancel_task_by_id(&task_id);
     Ok(())
 }
 
 #[flutter_rust_bridge::frb]
 pub fn download_manager_pause_all_tasks() -> Result<(), String> {
-    let state = require_state()?;
-    state.download_manager().pause_all_tasks();
+    let runtime = require_runtime()?;
+    runtime.downloads().pause_all_tasks();
     Ok(())
 }
 
 #[flutter_rust_bridge::frb]
 pub fn download_manager_cancel_all_tasks() -> Result<(), String> {
-    let state = require_state()?;
-    state.download_manager().cancel_all_tasks();
+    let runtime = require_runtime()?;
+    runtime.downloads().cancel_all_tasks();
     Ok(())
 }
 
 #[flutter_rust_bridge::frb]
 pub fn download_manager_cancel_task_by_url(url: String) -> Result<(), String> {
-    let state = require_state()?;
-    state.download_manager().cancel_task_by_url(&url);
+    let runtime = require_runtime()?;
+    runtime.downloads().cancel_task_by_url(&url);
     Ok(())
 }
 
 #[flutter_rust_bridge::frb]
 pub fn download_manager_pause_task_by_url(url: String) -> Result<(), String> {
-    let state = require_state()?;
-    state.download_manager().pause_task_by_url(&url);
+    let runtime = require_runtime()?;
+    runtime.downloads().pause_task_by_url(&url);
     Ok(())
 }
 
 #[flutter_rust_bridge::frb]
 pub fn download_manager_resume_task_by_url(url: String) -> Result<(), String> {
-    let state = require_state()?;
-    state.download_manager().resume_task_by_url(&url);
+    let runtime = require_runtime()?;
+    runtime.downloads().resume_task_by_url(&url);
     Ok(())
 }
 
 #[flutter_rust_bridge::frb]
 pub async fn download_manager_cancel_task_about_url(url: String) -> Result<(), String> {
-    let state = require_state()?;
-    state.download_manager().cancel_task_about_url(&url);
+    let runtime = require_runtime()?;
+    runtime.downloads().cancel_task_about_url(&url);
     Ok(())
 }

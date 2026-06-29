@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,15 +8,17 @@ use tokio::sync::broadcast;
 
 use crate::download::{DownloadStatus, DownloadTask};
 use crate::ext::log_ext::log_w;
-use crate::proxy::require_state;
+use crate::proxy::ProxyRuntime;
 
 pub const TASK_WAIT_TIMEOUT: Duration = Duration::from_secs(120);
 pub const CACHE_POLL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Scan the download pool for a matching task that already finished.
-pub fn find_completed_task_data(task_matches: &impl Fn(&DownloadTask) -> bool) -> Option<Bytes> {
-    let state = require_state().ok()?;
-    for task in state.download_manager().task_list() {
+pub fn find_completed_task_data(
+    runtime: &ProxyRuntime,
+    task_matches: &impl Fn(&DownloadTask) -> bool,
+) -> Option<Bytes> {
+    for task in runtime.downloads().task_list() {
         let task = task.lock();
         if task_matches(&*task) && task.status == DownloadStatus::Completed {
             return Some(task.data.clone());
@@ -26,6 +29,7 @@ pub fn find_completed_task_data(task_matches: &impl Fn(&DownloadTask) -> bool) -
 
 /// Wait for a download task to complete, fail, or cancel. Returns cached bytes on success.
 pub async fn wait_for_task_completion(
+    runtime: &ProxyRuntime,
     rx: &mut broadcast::Receiver<Arc<Mutex<DownloadTask>>>,
     task_matches: impl Fn(&DownloadTask) -> bool,
 ) -> Option<Bytes> {
@@ -56,7 +60,7 @@ pub async fn wait_for_task_completion(
                 }
             }
             Ok(Err(broadcast::error::RecvError::Lagged(_))) => {
-                if let Some(data) = find_completed_task_data(&task_matches) {
+                if let Some(data) = find_completed_task_data(runtime, &task_matches) {
                     return Some(data);
                 }
                 continue;

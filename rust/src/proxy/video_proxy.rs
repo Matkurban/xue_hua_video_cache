@@ -8,17 +8,17 @@ use crate::download::DownloadManager;
 use crate::ext::file_ext::FileExt;
 use crate::ext::log_ext::set_log_enabled;
 use crate::global::CacheKeyConfig;
-use crate::parser::url_parser_m3u8::clear_hls_registry;
+use crate::parser::hls_registry::clear_hls_registry;
 
 use super::app_context::AppContext;
 use super::local_proxy_server::LocalProxyServer;
 use super::platform_kind::PlatformKind;
+use super::proxy_runtime::ProxyRuntime;
 
 static STATE: OnceCell<Arc<VideoProxyState>> = OnceCell::new();
 
 pub struct VideoProxyState {
-    pub ctx: Arc<AppContext>,
-    download_manager: Mutex<Option<Arc<DownloadManager>>>,
+    pub runtime: Arc<ProxyRuntime>,
     local_proxy: Mutex<Option<LocalProxyServer>>,
     max_concurrent: Mutex<usize>,
     initialized: Mutex<bool>,
@@ -30,12 +30,12 @@ impl VideoProxyState {
         STATE.get().cloned()
     }
 
+    pub fn ctx(&self) -> Arc<AppContext> {
+        self.runtime.ctx.clone()
+    }
+
     pub fn download_manager(&self) -> Arc<DownloadManager> {
-        self.download_manager
-            .lock()
-            .as_ref()
-            .expect("XueHUAEVideoCache not initialized")
-            .clone()
+        self.runtime.downloads()
     }
 
     pub async fn init(
@@ -55,7 +55,7 @@ impl VideoProxyState {
                 return Err("XueHUAEVideoCache has been disposed".to_string());
             }
             apply_init_config(
-                &state.ctx,
+                &state.runtime.ctx,
                 &state.max_concurrent,
                 ip,
                 port,
@@ -83,12 +83,17 @@ impl VideoProxyState {
             segment_size,
             max_concurrent_downloads,
         );
-        let dm = Arc::new(DownloadManager::new(max_concurrent_downloads, ctx.clone()));
-        let mut proxy = LocalProxyServer::new(ctx.clone());
+        let cache = LruCacheSingleton::instance();
+        let dm = Arc::new(DownloadManager::new(
+            max_concurrent_downloads,
+            ctx.clone(),
+            cache.clone(),
+        ));
+        let runtime = Arc::new(ProxyRuntime::new(ctx, dm, cache));
+        let mut proxy = LocalProxyServer::new(runtime.clone());
         proxy.start().await.map_err(|e| e.to_string())?;
         let state = Arc::new(VideoProxyState {
-            ctx,
-            download_manager: Mutex::new(Some(dm)),
+            runtime,
             local_proxy: Mutex::new(Some(proxy)),
             max_concurrent,
             initialized: Mutex::new(true),
@@ -107,12 +112,15 @@ impl VideoProxyState {
                 "XueHUAEVideoCache.initialize() must be called before restart()".to_string(),
             );
         }
-        if let Some(dm) = self.download_manager.lock().take() {
-            dm.dispose();
-        }
+        self.runtime.downloads().dispose();
+        clear_hls_registry();
         let max = *self.max_concurrent.lock();
-        let new_dm = Arc::new(DownloadManager::new(max, self.ctx.clone()));
-        *self.download_manager.lock() = Some(new_dm);
+        let new_dm = Arc::new(DownloadManager::new(
+            max,
+            self.runtime.ctx.clone(),
+            self.runtime.cache.clone(),
+        ));
+        self.runtime.replace_downloads(new_dm);
         let mut proxy_opt = self.local_proxy.lock().take();
         if let Some(ref mut proxy) = proxy_opt {
             proxy.restart().await.map_err(|e| e.to_string())?;
@@ -123,7 +131,7 @@ impl VideoProxyState {
 
     pub async fn is_running(&self) -> bool {
         let (ip, port) = {
-            let config = self.ctx.config.read();
+            let config = self.runtime.ctx.config.read();
             (config.ip.clone(), config.port)
         };
         for _ in 0..3 {
@@ -159,9 +167,7 @@ impl VideoProxyState {
         }
         *self.disposed.lock() = true;
         *self.initialized.lock() = false;
-        if let Some(dm) = self.download_manager.lock().take() {
-            dm.dispose();
-        }
+        self.runtime.downloads().dispose();
         if let Some(mut proxy) = self.local_proxy.lock().take() {
             proxy.shutdown_listener();
         }
@@ -222,13 +228,13 @@ fn spawn_health_monitor(state: Arc<VideoProxyState>) {
     });
 }
 
-pub fn require_state() -> Result<Arc<VideoProxyState>, String> {
+pub fn require_runtime() -> Result<Arc<ProxyRuntime>, String> {
     let state = VideoProxyState::get()
         .ok_or_else(|| "XueHUAEVideoCache.initialize() must be called first".to_string())?;
-    if *state.disposed.lock() {
+    if state.is_disposed() {
         return Err("XueHUAEVideoCache has been disposed".to_string());
     }
-    Ok(state)
+    Ok(state.runtime.clone())
 }
 
 #[cfg(test)]
