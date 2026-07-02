@@ -63,6 +63,7 @@ class VideoCaching {
       onError: (Object error, StackTrace stackTrace) {
         if (!controller.isClosed) {
           controller.addError(error, stackTrace);
+          controller.close();
         }
       },
     );

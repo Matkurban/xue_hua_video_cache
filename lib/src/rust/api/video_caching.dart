@@ -46,9 +46,11 @@ Future<HlsMasterPlaylistInfo?> videoCachingParseHlsMasterPlaylist({
 Future<void> lruRemoveCacheByUrl({
   required String url,
   required bool singleFile,
+  Map<String, String>? headers,
 }) => RustLib.instance.api.crateApiVideoCachingLruRemoveCacheByUrl(
   url: url,
   singleFile: singleFile,
+  headers: headers,
 );
 
 class HlsMasterPlaylistInfo {

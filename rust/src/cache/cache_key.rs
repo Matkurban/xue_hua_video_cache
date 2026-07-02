@@ -139,9 +139,11 @@ fn compute_entry(task: &DownloadTask, ctx: &CacheKeyContext<'_>) -> String {
             .or_insert_with(|| "0".to_string());
         query.insert("endRange".to_string(), end.to_string());
     }
-    let q: String = query
+    let mut keys: Vec<String> = query.keys().cloned().collect();
+    keys.sort();
+    let q: String = keys
         .iter()
-        .map(|(k, v)| format!("{k}={v}"))
+        .map(|k| format!("{k}={}", query[k]))
         .collect::<Vec<_>>()
         .join("&");
     safe_uri.set_query(if q.is_empty() { None } else { Some(&q) });
@@ -157,6 +159,7 @@ mod golden_tests {
 
     use crate::download::DownloadTask;
     use crate::ext::string_ext::generate_md5;
+    use crate::ext::uri_ext::hls_key_for_url;
     use crate::global::{CacheKeyConfig, Config};
     use crate::matchers::UrlMatcherConfigurable;
 
@@ -218,12 +221,26 @@ mod golden_tests {
         let master = "https://cdn.example.com/master.m3u8";
         let segment_url = "https://cdn.example.com/seg001.ts";
         let mut task = DownloadTask::new(to_safe_uri(segment_url), None);
-        task.hls_key = Some(generate_md5(master));
+        task.hls_key = Some(hls_key_for_url(master));
         task.start_range = 0;
         task.end_range = Some(1023);
         let key = CacheKey::for_task(&task, &ctx);
-        assert_eq!(key.directory, generate_md5(master));
+        assert_eq!(key.directory, hls_key_for_url(master));
         assert_ne!(key.entry, key.directory);
+    }
+
+    #[test]
+    fn ranged_entry_is_stable_across_query_map_iteration() {
+        let (config, matcher) = ctx();
+        let ctx = CacheKeyContext::new(config, &matcher);
+        let url = "https://example.com/video.mp4?token=abc&user=1&sig=xyz";
+        let uri = Url::parse(url).unwrap();
+        let mut task = DownloadTask::new(uri, None);
+        task.start_range = 0;
+        task.end_range = Some(1023);
+        let first = CacheKey::for_task(&task, &ctx).entry;
+        let second = CacheKey::for_task(&task, &ctx).entry;
+        assert_eq!(first, second);
     }
 
     #[test]

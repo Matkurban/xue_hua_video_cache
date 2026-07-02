@@ -131,6 +131,7 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiVideoCachingLruRemoveCacheByUrl({
     required String url,
     required bool singleFile,
+    Map<String, String>? headers,
   });
 
   Future<void> crateApiVideoProxySetCacheRootPath({required String path});
@@ -652,6 +653,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Future<void> crateApiVideoCachingLruRemoveCacheByUrl({
     required String url,
     required bool singleFile,
+    Map<String, String>? headers,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -659,6 +661,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(url, serializer);
           sse_encode_bool(singleFile, serializer);
+          sse_encode_opt_Map_String_String_None(headers, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -671,7 +674,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiVideoCachingLruRemoveCacheByUrlConstMeta,
-        argValues: [url, singleFile],
+        argValues: [url, singleFile, headers],
         apiImpl: this,
       ),
     );
@@ -680,7 +683,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiVideoCachingLruRemoveCacheByUrlConstMeta =>
       const TaskConstMeta(
         debugName: "lru_remove_cache_by_url",
-        argNames: ["url", "singleFile"],
+        argNames: ["url", "singleFile", "headers"],
       );
 
   @override

@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 use url::Url;
 
 use crate::ext::string_ext::to_safe_uri;
+use crate::ext::uri_ext::hls_key_for_url;
 use crate::proxy::ProxyRuntime;
 
 use super::hls_parser::HlsMasterPlaylist;
@@ -69,7 +70,7 @@ impl VideoCaching {
             let _ = parser;
             return None;
         }
-        let hls_key = crate::ext::string_ext::generate_md5(url);
+        let hls_key = hls_key_for_url(url);
         match m3u8
             .parse_playlist(&uri, headers.as_ref(), Some(&hls_key))
             .await?

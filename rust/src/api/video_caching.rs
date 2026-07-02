@@ -107,9 +107,21 @@ pub async fn video_caching_parse_hls_master_playlist(
 }
 
 #[flutter_rust_bridge::frb]
-pub async fn lru_remove_cache_by_url(url: String, single_file: bool) -> Result<(), String> {
+pub async fn lru_remove_cache_by_url(
+    url: String,
+    single_file: bool,
+    headers: Option<HashMap<String, String>>,
+) -> Result<(), String> {
     let runtime = require_runtime()?;
     let config = runtime.ctx.config.read().clone();
     let matcher = runtime.ctx.url_matcher.as_ref();
-    cache_removal::remove_cache_by_url(&runtime.cache, &url, single_file, &config, matcher).await
+    cache_removal::remove_cache_by_url(
+        &runtime.cache,
+        &url,
+        single_file,
+        headers,
+        &config,
+        matcher,
+    )
+    .await
 }

@@ -12,8 +12,8 @@ use url::Url;
 use crate::download::DownloadTask;
 use crate::ext::log_ext::{log_d, log_w};
 use crate::ext::socket_ext::append_headers_and_body;
-use crate::ext::string_ext::{generate_md5, to_safe_uri};
-use crate::ext::uri_ext::uri_generate_md5;
+use crate::ext::string_ext::to_safe_uri;
+use crate::ext::uri_ext::{hls_key_for_url, uri_generate_md5};
 use crate::proxy::ProxyRuntime;
 
 use super::download_wait::{CACHE_POLL_TIMEOUT, TASK_WAIT_TIMEOUT, wait_for_cache};
@@ -65,6 +65,33 @@ impl UrlParserM3U8 {
         headers: Option<&HashMap<String, String>>,
     ) -> Vec<HlsSegment> {
         self.resolver.parse_segment(uri, headers).await
+    }
+
+    async fn hls_segments_cached(
+        &self,
+        segments: &[HlsSegment],
+        hls_key: &str,
+        headers: Option<&HashMap<String, String>>,
+    ) -> bool {
+        for segment in segments {
+            let task = segment_to_task(segment, hls_key, headers);
+            if self.cache(&task).await.is_none() {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod hls_key_tests {
+    use crate::ext::string_ext::generate_md5;
+    use crate::ext::uri_ext::hls_key_for_url;
+
+    #[test]
+    fn precache_key_uses_normalized_url_not_raw_md5() {
+        let url = "  https://cdn.example.com/master.m3u8  ";
+        assert_ne!(generate_md5(url), hls_key_for_url(url));
     }
 }
 
@@ -184,7 +211,7 @@ impl UrlParser for UrlParserM3U8 {
         if cache_segments > segments.len() {
             cache_segments = segments.len();
         }
-        let hls_key = generate_md5(url);
+        let hls_key = hls_key_for_url(url);
         for segment in segments.drain(..cache_segments) {
             let task = segment_to_task(&segment, &hls_key, headers.as_ref());
             if self.cache(&task).await.is_none() {
@@ -214,7 +241,7 @@ impl UrlParser for UrlParserM3U8 {
             cache_segments = segments.len();
         }
         let selected: Vec<HlsSegment> = segments.drain(..cache_segments).collect();
-        let hls_key = generate_md5(url);
+        let hls_key = hls_key_for_url(url);
         let url_owned = url.to_string();
 
         if download_now {
@@ -261,9 +288,9 @@ impl UrlParser for UrlParserM3U8 {
                 ));
             }
         } else {
-            for segment in selected {
+            for segment in &selected {
                 let task = Arc::new(Mutex::new(segment_to_task(
-                    &segment,
+                    segment,
                     &hls_key,
                     headers.as_ref(),
                 )));
@@ -273,7 +300,7 @@ impl UrlParser for UrlParserM3U8 {
             let deadline = tokio::time::Instant::now() + TASK_WAIT_TIMEOUT;
             while tokio::time::Instant::now() < deadline {
                 if self
-                    .is_cached(url, headers_for_wait.clone(), cache_segments)
+                    .hls_segments_cached(&selected, &hls_key, headers_for_wait.as_ref())
                     .await
                 {
                     return Ok(());

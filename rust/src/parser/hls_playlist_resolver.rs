@@ -87,10 +87,12 @@ impl HlsPlaylistResolver {
     ) -> Option<HlsMediaPlaylist> {
         match self.parse_playlist(uri, headers, hls_key).await? {
             HlsPlaylist::Master(master) => {
+                let default_key = uri_generate_md5(uri);
+                let media_hls_key = hls_key.unwrap_or(&default_key);
                 for media_url in master.media_playlist_urls {
                     let master_uri = to_safe_uri(&format!("{}{}", uri_base(uri), media_url));
                     if let Some(HlsPlaylist::Media(media)) = self
-                        .parse_playlist(&master_uri, headers, Some(&uri_generate_md5(uri)))
+                        .parse_playlist(&master_uri, headers, Some(media_hls_key))
                         .await
                     {
                         return Some(media);

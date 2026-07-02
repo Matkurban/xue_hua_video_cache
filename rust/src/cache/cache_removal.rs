@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::cache::cache_key::{CacheKey, CacheKeyContext};
 use crate::download::DownloadTask;
 use crate::ext::file_ext::FileExt;
@@ -15,6 +17,7 @@ pub async fn remove_cache_by_url(
     cache: &LruCacheSingleton,
     url: &str,
     single_file: bool,
+    headers: Option<HashMap<String, String>>,
     config: &Config,
     matcher: &dyn UrlMatcher,
 ) -> Result<(), String> {
@@ -22,7 +25,7 @@ pub async fn remove_cache_by_url(
     let dir_key = generate_md5(url);
 
     if single_file {
-        remove_single_entry(cache, url, config, matcher).await;
+        remove_single_entry(cache, url, headers, config, matcher).await;
         return Ok(());
     }
 
@@ -55,12 +58,14 @@ pub async fn remove_cache_by_url(
 async fn remove_single_entry(
     cache: &LruCacheSingleton,
     url: &str,
+    headers: Option<HashMap<String, String>>,
     config: &Config,
     matcher: &dyn UrlMatcher,
 ) {
     let ctx = CacheKeyContext::new(config.clone(), matcher);
     let uri = to_safe_uri(url);
     let mut task = DownloadTask::new(uri.clone(), None);
+    task.headers = headers;
     let dir_key = generate_md5(url);
 
     let full_key = CacheKey::for_task(&task, &ctx).entry;
@@ -142,6 +147,7 @@ async fn remove_dir_recursive(cache: &LruCacheSingleton, dir: &std::path::PathBu
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use std::collections::HashMap;
 
     use crate::cache::LruCacheSingleton;
     use crate::cache::cache_key::{CacheKey, CacheKeyContext};
@@ -176,7 +182,33 @@ mod tests {
         let task = DownloadTask::new(to_safe_uri(url), None);
         let key = CacheKey::for_task(&task, &ctx).entry;
         cache.memory_put(&key, Bytes::from_static(b"cached")).await;
-        remove_single_entry(&cache, url, &config, &matcher).await;
+        remove_single_entry(&cache, url, None, &config, &matcher).await;
+        assert!(cache.memory_get(&key).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn remove_single_entry_clears_custom_cache_id_host_override() {
+        let _guard = cache_test_lock();
+        let cache = LruCacheSingleton::instance();
+        cache.memory_clear().await;
+        let mut config = Config::default();
+        config.custom_cache_id = "Custom-Cache-ID".to_string();
+        let matcher = test_matcher();
+        let ctx = CacheKeyContext::new(config.clone(), &matcher);
+        let url = SAMPLE_MP4;
+        let uri = to_safe_uri(url);
+        let mut task = DownloadTask::new(uri, None);
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Custom-Cache-ID".to_string(),
+            "cache-host.example.com".to_string(),
+        );
+        task.headers = Some(headers.clone());
+        let key = CacheKey::for_task(&task, &ctx).entry;
+        cache.memory_put(&key, Bytes::from_static(b"cached")).await;
+
+        remove_single_entry(&cache, url, Some(headers), &config, &matcher).await;
+
         assert!(cache.memory_get(&key).await.is_none());
     }
 
@@ -214,7 +246,7 @@ mod tests {
                 .await;
         }
 
-        remove_single_entry(&cache, url, &config, &matcher).await;
+        remove_single_entry(&cache, url, None, &config, &matcher).await;
 
         assert!(cache.memory_get(&full_key).await.is_none());
         assert!(cache.memory_get(&metadata_key).await.is_none());

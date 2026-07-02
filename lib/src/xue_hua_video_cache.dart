@@ -15,8 +15,12 @@ import 'rust/proxy/platform_kind.dart';
 
 /// Forwards download pool control to the Rust backend.
 class _DownloadBridge {
-  Stream<DownloadTask> get stream =>
-      frb_dm.downloadManagerSubscribe().map(DownloadTask.fromInfo);
+  _DownloadBridge()
+      : _stream = frb_dm.downloadManagerSubscribe().map(DownloadTask.fromInfo);
+
+  final Stream<DownloadTask> _stream;
+
+  Stream<DownloadTask> get stream => _stream;
 
   Future<List<DownloadTask>> get allTasks async =>
       (await frb_dm.downloadManagerAllTasks())
@@ -157,8 +161,15 @@ class XueHuaVideoCache {
     Map<String, Object>? headers,
   }) => VideoCaching.parseHlsMasterPlaylist(url, headers: headers);
 
-  static Future<void> removeCacheByUrl(String url, {bool singleFile = false}) =>
-      frb_vc.lruRemoveCacheByUrl(url: url, singleFile: singleFile);
+  static Future<void> removeCacheByUrl(
+    String url, {
+    bool singleFile = false,
+    Map<String, Object>? headers,
+  }) => frb_vc.lruRemoveCacheByUrl(
+    url: url,
+    singleFile: singleFile,
+    headers: headers?.map((k, v) => MapEntry(k, v.toString())),
+  );
 
   static Stream<DownloadTask> get downloadStream => _download.stream;
 
