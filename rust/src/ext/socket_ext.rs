@@ -24,3 +24,21 @@ pub async fn append_headers_and_body(
     }
     append_to_writer(writer, body).await
 }
+
+pub async fn write_bad_gateway(writer: &mut (impl AsyncWrite + Unpin), message: &str) -> bool {
+    let body = message.as_bytes();
+    let headers = format!(
+        "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: {}",
+        body.len()
+    );
+    append_headers_and_body(writer, &headers, body).await
+}
+
+pub async fn write_bad_request(writer: &mut (impl AsyncWrite + Unpin), message: &str) -> bool {
+    let body = message.as_bytes();
+    let headers = format!(
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: {}",
+        body.len()
+    );
+    append_headers_and_body(writer, &headers, body).await
+}

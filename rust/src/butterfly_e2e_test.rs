@@ -1,5 +1,5 @@
-//! Network integration test against the official Flutter butterfly.mp4 sample.
-//! Opt-in only: `cargo test --ignored butterfly`
+//! Network integration test against the sample MP4.
+//! Opt-in only: `cargo test --ignored sample_mp4`
 
 #[cfg(test)]
 mod tests {
@@ -10,9 +10,7 @@ mod tests {
     use crate::parser::video_caching::VideoCaching;
     use crate::proxy::platform_kind::PlatformKind;
     use crate::proxy::video_proxy::VideoProxyState;
-
-    const BUTTERFLY_MP4: &str =
-        "https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4";
+    use crate::test_urls::SAMPLE_MP4;
 
     const WAIT_CACHED_TIMEOUT: Duration = Duration::from_secs(45);
 
@@ -22,7 +20,7 @@ mod tests {
     ) -> bool {
         let deadline = tokio::time::Instant::now() + WAIT_CACHED_TIMEOUT;
         while tokio::time::Instant::now() < deadline {
-            if VideoCaching::is_cached(runtime.clone(), BUTTERFLY_MP4, None, segments).await {
+            if VideoCaching::is_cached(runtime.clone(), SAMPLE_MP4, None, segments).await {
                 return true;
             }
             tokio::time::sleep(Duration::from_millis(400)).await;
@@ -31,9 +29,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "network E2E — run with: cargo test --ignored butterfly"]
-    async fn butterfly_mp4_precache_is_cached_and_proxy_serves_range() {
-        let temp = std::env::temp_dir().join(format!("xue_hua_butterfly_{}", std::process::id()));
+    #[ignore = "network E2E — run with: cargo test --ignored sample_mp4"]
+    async fn sample_mp4_precache_is_cached_and_proxy_serves_range() {
+        let temp = std::env::temp_dir().join(format!("xue_hua_sample_mp4_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp);
         std::fs::create_dir_all(&temp).unwrap();
         FileExt::set_cache_root_path(temp.to_string_lossy().to_string());
@@ -58,17 +56,17 @@ mod tests {
         assert!(state.is_running().await);
 
         assert!(
-            !VideoCaching::is_cached(runtime.clone(), BUTTERFLY_MP4, None, 2).await,
+            !VideoCaching::is_cached(runtime.clone(), SAMPLE_MP4, None, 2).await,
             "should not be cached before precache"
         );
 
-        VideoCaching::precache(runtime.clone(), BUTTERFLY_MP4, None, 2, true, None)
+        VideoCaching::precache(runtime.clone(), SAMPLE_MP4, None, 2, true, None)
             .await
             .expect("precache");
 
         assert!(
             wait_cached(runtime.clone(), 2).await,
-            "timed out waiting for butterfly.mp4 segments"
+            "timed out waiting for sample mp4 segments"
         );
 
         let (ip, port) = {
@@ -76,7 +74,7 @@ mod tests {
             (cfg.ip.clone(), cfg.port)
         };
 
-        let local_path = urlencoding::encode(BUTTERFLY_MP4);
+        let local_path = urlencoding::encode(SAMPLE_MP4);
         let addr = format!("{ip}:{port}");
         let mut stream = tokio::net::TcpStream::connect(&addr)
             .await

@@ -1,9 +1,11 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:xue_hua_video_cache/xue_hua_video_cache.dart';
 
 const _sampleMp4 =
-    'https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4';
+    'https://jsontodart.cn/api/object/7976982000/msg_video_7976982000_1782918277290246.mp4';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -56,7 +58,7 @@ class _VideoPlayPageState extends State<VideoPlayPage> {
     try {
       // butterfly.mp4 is ~2.4MB; default segment size is 2MB — cache both segments.
       // await XueHuaVideoCache.precache(_sampleMp4, cacheSegments: 2);
-      _cached = await XueHuaVideoCache.isCached(_sampleMp4, cacheSegments: 2);
+      // _cached = await XueHuaVideoCache.isCached(_sampleMp4, cacheSegments: 2);
       final uri = _sampleMp4.toLocalUri();
       final controller = VideoPlayerController.networkUrl(uri);
       await controller.initialize();
@@ -66,7 +68,8 @@ class _VideoPlayPageState extends State<VideoPlayPage> {
         return;
       }
       setState(() => _controller = controller);
-    } catch (e) {
+    } catch (e,s) {
+      developer.log(e.toString(),stackTrace: s);
       if (mounted) setState(() => _error = e.toString());
     }
   }

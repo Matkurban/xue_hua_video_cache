@@ -3,7 +3,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use regex::Regex;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use url::Url;
@@ -12,14 +11,16 @@ use crate::cache::cache_key::{CacheKey, CacheKeyContext};
 use crate::download::DownloadTask;
 use crate::ext::file_ext::FileExt;
 use crate::ext::log_ext::{log_d, log_w};
-use crate::ext::socket_ext::{append_string, append_to_writer};
+use crate::ext::socket_ext::{append_string, append_to_writer, write_bad_gateway};
 use crate::ext::string_ext::to_safe_uri;
 use crate::proxy::ProxyRuntime;
 
+use super::content_length_probe::{ContentLengthProbe, cached_content_length};
 use super::download_wait::{CACHE_POLL_TIMEOUT, wait_for_cache};
 use super::range_response::{
     RangeSpec, clamped_range_end, effective_streaming_spec, format_content_range_for_file,
-    parse_range_from_headers, streaming_content_length, streaming_status_line,
+    parse_range_from_headers, streaming_body_length_from_spec, streaming_content_length,
+    streaming_status_line,
 };
 use super::segment_fetcher::SegmentFetcher;
 use super::segment_resolver::SegmentResolver;
@@ -31,57 +32,49 @@ pub(crate) enum RangeParseMode {
     Mp4,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RespondPath {
+    ProbeFast,
+    BoundedRange,
+    ProbeGet,
+}
+
 pub(crate) struct RangeResponder;
 
-impl RangeResponder {
-    pub(crate) async fn head(
-        runtime: &Arc<ProxyRuntime>,
-        uri: &Url,
-        headers: Option<&HashMap<String, String>>,
-    ) -> i64 {
-        let config = runtime.ctx.config.read().clone();
-        let mut request = runtime.ctx.http_client.head(uri.as_str());
-        if let Some(h) = headers {
-            for (k, v) in h {
-                let kl = k.to_lowercase();
-                if kl == "host" && v == &config.server_url() {
-                    continue;
-                }
-                if kl == "range" {
-                    continue;
-                }
-                request = request.header(k.as_str(), v.as_str());
-            }
-        }
-        let response = match request.send().await {
-            Ok(r) => r,
-            Err(_) => return -1,
-        };
-        if let Some(content_range) = response.headers().get("content-range") {
-            if let Ok(s) = content_range.to_str() {
-                if let Some(caps) = Regex::new(r"bytes (\d+)-(\d+)/(\d+)")
-                    .ok()
-                    .and_then(|re| re.captures(s))
-                {
-                    if let Some(total) = caps.get(3) {
-                        let total = total.as_str();
-                        if !total.is_empty() && total != "0" {
-                            if let Ok(n) = total.parse::<i64>() {
-                                return n;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        response
-            .headers()
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<i64>().ok())
-            .unwrap_or(-1)
-    }
+fn is_probe_range(range_spec: Option<&RangeSpec>) -> bool {
+    matches!(
+        range_spec,
+        Some(RangeSpec {
+            start: 0,
+            end: Some(1)
+        })
+    )
+}
 
+fn is_bounded_range(range_spec: Option<&RangeSpec>) -> bool {
+    range_spec.is_some_and(|spec| spec.end.is_some())
+}
+
+fn incoming_range_header(headers: &HashMap<String, String>) -> Option<String> {
+    headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("range"))
+        .map(|(_, value)| value.clone())
+}
+
+fn log_respond_path(path: RespondPath, range_header: Option<&str>) {
+    let path_name = match path {
+        RespondPath::ProbeFast => "probe_fast",
+        RespondPath::BoundedRange => "bounded_range",
+        RespondPath::ProbeGet => "probe_get",
+    };
+    log_d(&format!(
+        "[RangeResponder] range={} path={path_name}",
+        range_header.unwrap_or("(none)")
+    ));
+}
+
+impl RangeResponder {
     pub(crate) async fn respond(
         runtime: &Arc<ProxyRuntime>,
         mut stream: TcpStream,
@@ -94,9 +87,11 @@ impl RangeResponder {
             RangeParseMode::Mp4 => "UrlParserMp4",
         };
         let mp4_mode = mode == RangeParseMode::Mp4;
+        let include_content_range = runtime.ctx.platform.is_android() || mp4_mode;
 
         let result = async {
             let range_spec = parse_range_from_headers(&headers);
+            let range_header = incoming_range_header(&headers);
             let status_line = streaming_status_line(range_spec.as_ref(), mp4_mode);
             let mut response_headers = vec![
                 status_line.to_string(),
@@ -104,29 +99,18 @@ impl RangeResponder {
                 "Content-Type: video/mp4".to_string(),
             ];
 
-            if runtime.ctx.platform.is_android() {
-                parse_android(
-                    runtime,
-                    &mut stream,
-                    &uri,
-                    &mut response_headers,
-                    range_spec.as_ref(),
-                    &headers,
-                    mode,
-                )
-                .await?;
-            } else {
-                parse_ios(
-                    runtime,
-                    &mut stream,
-                    &uri,
-                    &mut response_headers,
-                    range_spec.as_ref(),
-                    &headers,
-                    mode,
-                )
-                .await?;
-            }
+            parse_streaming(
+                runtime,
+                &mut stream,
+                &uri,
+                &mut response_headers,
+                range_spec.as_ref(),
+                range_header.as_deref(),
+                &headers,
+                mode,
+                include_content_range,
+            )
+            .await?;
             stream.flush().await.ok();
             Ok::<(), String>(())
         }
@@ -139,6 +123,140 @@ impl RangeResponder {
         log_d("Connection closed\n");
         result.is_ok()
     }
+}
+
+async fn parse_streaming(
+    runtime: &Arc<ProxyRuntime>,
+    stream: &mut TcpStream,
+    uri: &Url,
+    response_headers: &mut Vec<String>,
+    range_spec: Option<&RangeSpec>,
+    range_header: Option<&str>,
+    headers: &HashMap<String, String>,
+    mode: RangeParseMode,
+    include_content_range: bool,
+) -> Result<(), String> {
+    let config = runtime.ctx.config.read().clone();
+    let segment_size = config.segment_size;
+
+    if is_probe_range(range_spec) {
+        log_respond_path(RespondPath::ProbeFast, range_header);
+        return respond_probe_fast(
+            runtime,
+            stream,
+            uri,
+            response_headers,
+            range_spec.unwrap(),
+            headers,
+        )
+        .await;
+    }
+
+    if is_bounded_range(range_spec) {
+        log_respond_path(RespondPath::BoundedRange, range_header);
+        let spec = range_spec.unwrap();
+        let body_length = streaming_body_length_from_spec(spec).unwrap_or(0);
+        let file_content_length =
+            cached_content_length(runtime, uri, headers).await.unwrap_or(-1);
+        let response_end = spec.end.unwrap();
+
+        response_headers.push(format!("content-length: {body_length}"));
+        if include_content_range {
+            response_headers.push(format!(
+                "content-range: {}",
+                format_content_range_for_file(spec, response_end, file_content_length)
+            ));
+        }
+        let header_block = response_headers.join("\r\n");
+        if !append_string(stream, &header_block).await {
+            return Err("write headers failed".into());
+        }
+
+        return serve_segments(
+            runtime,
+            stream,
+            uri,
+            headers,
+            spec.start,
+            response_end,
+            segment_size,
+            mode,
+        )
+        .await;
+    }
+
+    log_respond_path(RespondPath::ProbeGet, range_header);
+    let content_length = match ContentLengthProbe::probe(runtime, uri, headers).await {
+        Ok(len) => len,
+        Err(e) => {
+            log_w(&format!("[RangeResponder] probe_get failed: {e}"));
+            if !write_bad_gateway(stream, &e).await {
+                return Err("write 502 failed".into());
+            }
+            return Ok(());
+        }
+    };
+
+    if content_length <= 0 {
+        if !write_bad_gateway(stream, "origin content-length probe failed").await {
+            return Err("write 502 failed".into());
+        }
+        return Ok(());
+    }
+
+    let range_spec = effective_streaming_spec(range_spec.copied());
+    let request_range_end = clamped_range_end(&range_spec, content_length);
+    response_headers.push(format!(
+        "content-length: {}",
+        streaming_content_length(&range_spec, content_length)
+    ));
+    if include_content_range {
+        response_headers.push(format!(
+            "content-range: {}",
+            format_content_range_for_file(&range_spec, request_range_end, content_length)
+        ));
+    }
+    let header_block = response_headers.join("\r\n");
+    if !append_string(stream, &header_block).await {
+        return Err("write headers failed".into());
+    }
+
+    serve_segments(
+        runtime,
+        stream,
+        uri,
+        headers,
+        range_spec.start,
+        request_range_end,
+        segment_size,
+        mode,
+    )
+    .await
+}
+
+async fn respond_probe_fast(
+    runtime: &Arc<ProxyRuntime>,
+    stream: &mut TcpStream,
+    uri: &Url,
+    response_headers: &mut Vec<String>,
+    probe_spec: &RangeSpec,
+    headers: &HashMap<String, String>,
+) -> Result<(), String> {
+    let file_content_length = cached_content_length(runtime, uri, headers)
+        .await
+        .unwrap_or(-1);
+    response_headers.push("content-length: 2".to_string());
+    response_headers.push(format!(
+        "content-range: {}",
+        format_content_range_for_file(probe_spec, 1, file_content_length)
+    ));
+    let header_block = response_headers.join("\r\n");
+    if !append_string(stream, &header_block).await {
+        return Err("write headers failed".into());
+    }
+    let probe_bytes = fetch_range_bytes(runtime, uri, headers, 0, 1).await;
+    let _ = append_to_writer(stream, &probe_bytes).await;
+    Ok(())
 }
 
 async fn concurrent(
@@ -157,7 +275,10 @@ async fn concurrent(
     let mut new_task = task.clone();
     let url = new_task.url();
     let uri = to_safe_uri(&url);
-    let content_length = RangeResponder::head(runtime, &uri, Some(headers)).await;
+    let content_length = match ContentLengthProbe::probe(runtime, &uri, headers).await {
+        Ok(len) => len,
+        Err(_) => -1,
+    };
     const MAX_LOOKAHEAD_SKIPS: i32 = 128;
     let mut skipped = 0i32;
     let mut active_size = pool
@@ -217,147 +338,6 @@ async fn concurrent(
             .filter(|t| t.lock().url() == url)
             .count();
     }
-}
-
-async fn parse_android(
-    runtime: &Arc<ProxyRuntime>,
-    stream: &mut TcpStream,
-    uri: &Url,
-    response_headers: &mut Vec<String>,
-    range_spec: Option<&RangeSpec>,
-    headers: &HashMap<String, String>,
-    mode: RangeParseMode,
-) -> Result<(), String> {
-    let config = runtime.ctx.config.read().clone();
-    let segment_size = config.segment_size;
-
-    let mut probe = DownloadTask::new(uri.clone(), None);
-    probe.headers = Some(headers.clone());
-    probe.start_range = 0;
-    probe.end_range = Some(1);
-
-    let mut content_length = 0i64;
-    if let Some(data) = SegmentResolver::resolve(runtime, &probe).await {
-        content_length = String::from_utf8_lossy(&data).parse().unwrap_or(0);
-    }
-    if content_length == 0 {
-        content_length = RangeResponder::head(runtime, uri, Some(headers)).await;
-        SegmentResolver::store_content_length(runtime, &probe, content_length).await;
-    }
-
-    let range_spec = effective_streaming_spec(range_spec.copied());
-    let request_range_end = clamped_range_end(&range_spec, content_length);
-    response_headers.push(format!(
-        "content-length: {}",
-        streaming_content_length(&range_spec, content_length)
-    ));
-    response_headers.push(format!(
-        "content-range: {}",
-        format_content_range_for_file(&range_spec, request_range_end, content_length)
-    ));
-    let header_block = response_headers.join("\r\n");
-    if !append_string(stream, &header_block).await {
-        return Err("write headers failed".into());
-    }
-
-    serve_segments(
-        runtime,
-        stream,
-        uri,
-        headers,
-        range_spec.start,
-        request_range_end,
-        segment_size,
-        mode,
-    )
-    .await
-}
-
-async fn parse_ios(
-    runtime: &Arc<ProxyRuntime>,
-    stream: &mut TcpStream,
-    uri: &Url,
-    response_headers: &mut Vec<String>,
-    range_spec: Option<&RangeSpec>,
-    headers: &HashMap<String, String>,
-    mode: RangeParseMode,
-) -> Result<(), String> {
-    let config = runtime.ctx.config.read().clone();
-    let segment_size = config.segment_size;
-
-    let file_content_length = resolve_file_content_length(runtime, uri, headers).await;
-
-    if matches!(
-        range_spec,
-        Some(RangeSpec {
-            start: 0,
-            end: Some(1)
-        })
-    ) {
-        let probe_spec = range_spec.unwrap();
-        response_headers.push(format!(
-            "content-range: {}",
-            format_content_range_for_file(probe_spec, 1, file_content_length)
-        ));
-        let header_block = response_headers.join("\r\n");
-        if !append_string(stream, &header_block).await {
-            return Err("write headers failed".into());
-        }
-        let probe_bytes = fetch_range_bytes(runtime, uri, headers, 0, 1).await;
-        let _ = append_to_writer(stream, &probe_bytes).await;
-        return Ok(());
-    }
-
-    let range_spec = effective_streaming_spec(range_spec.copied());
-    let request_range_end = clamped_range_end(&range_spec, file_content_length);
-
-    response_headers.push(format!(
-        "content-length: {}",
-        streaming_content_length(&range_spec, file_content_length)
-    ));
-    if mode == RangeParseMode::Mp4 {
-        response_headers.push(format!(
-            "content-range: {}",
-            format_content_range_for_file(&range_spec, request_range_end, file_content_length)
-        ));
-    }
-    let header_block = response_headers.join("\r\n");
-    if !append_string(stream, &header_block).await {
-        return Err("write headers failed".into());
-    }
-
-    serve_segments(
-        runtime,
-        stream,
-        uri,
-        headers,
-        range_spec.start,
-        request_range_end,
-        segment_size,
-        mode,
-    )
-    .await
-}
-
-async fn resolve_file_content_length(
-    runtime: &Arc<ProxyRuntime>,
-    uri: &Url,
-    headers: &HashMap<String, String>,
-) -> i64 {
-    let mut probe = DownloadTask::new(uri.clone(), None);
-    probe.headers = Some(headers.clone());
-    probe.start_range = 0;
-    probe.end_range = Some(1);
-
-    let mut content_length = 0i64;
-    if let Some(data) = SegmentResolver::resolve(runtime, &probe).await {
-        content_length = String::from_utf8_lossy(&data).parse().unwrap_or(0);
-    }
-    if content_length == 0 {
-        content_length = RangeResponder::head(runtime, uri, Some(headers)).await;
-        SegmentResolver::store_content_length(runtime, &probe, content_length).await;
-    }
-    content_length.max(0)
 }
 
 async fn fetch_range_bytes(
@@ -473,4 +453,42 @@ async fn serve_segments(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::range_response::{parse_range_header, streaming_body_length_from_spec};
+
+    #[test]
+    fn is_probe_range_matches_bytes_zero_one() {
+        let spec = parse_range_header("bytes=0-1").unwrap();
+        assert!(is_probe_range(Some(&spec)));
+    }
+
+    #[test]
+    fn is_probe_range_rejects_other_ranges() {
+        let spec = parse_range_header("bytes=0-").unwrap();
+        assert!(!is_probe_range(Some(&spec)));
+    }
+
+    #[test]
+    fn is_bounded_range_matches_closed_range() {
+        let spec = parse_range_header("bytes=1048576-2097151").unwrap();
+        assert!(is_bounded_range(Some(&spec)));
+        assert_eq!(streaming_body_length_from_spec(&spec), Some(1_048_576));
+    }
+
+    #[test]
+    fn is_bounded_range_rejects_open_ended() {
+        let spec = parse_range_header("bytes=100-").unwrap();
+        assert!(!is_bounded_range(Some(&spec)));
+    }
+
+    #[test]
+    fn probe_fast_headers_include_content_length_two() {
+        let spec = parse_range_header("bytes=0-1").unwrap();
+        assert!(is_probe_range(Some(&spec)));
+        assert_eq!(streaming_body_length_from_spec(&spec), Some(2));
+    }
 }

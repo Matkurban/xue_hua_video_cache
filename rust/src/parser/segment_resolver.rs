@@ -70,12 +70,14 @@ mod tests {
     use crate::download::DownloadTask;
     use crate::proxy::build_test_runtime;
 
+    use crate::test_urls::SAMPLE_MP4;
+
     use super::*;
 
     #[tokio::test]
     async fn resolve_returns_none_when_cache_empty() {
         let runtime = build_test_runtime();
-        let uri = Url::parse("https://example.com/video.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let task = DownloadTask::new(uri, None);
         assert!(SegmentResolver::resolve(&runtime, &task).await.is_none());
     }

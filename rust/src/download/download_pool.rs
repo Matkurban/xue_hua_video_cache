@@ -422,6 +422,8 @@ mod tests {
     use crate::proxy::PlatformKind;
     use crate::proxy::app_context::AppContext;
 
+    use crate::test_urls::SAMPLE_MP4;
+
     use super::*;
 
     fn test_ctx() -> Arc<AppContext> {
@@ -438,7 +440,7 @@ mod tests {
     #[tokio::test]
     async fn add_task_increases_task_list() {
         let pool = DownloadPool::new(1, test_ctx(), test_cache());
-        let uri = Url::parse("https://example.com/1.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let task = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
         pool.add_task(task).await;
         assert_eq!(pool.task_list().len(), 1);
@@ -448,7 +450,7 @@ mod tests {
     #[tokio::test]
     async fn resume_sets_idle_so_scheduler_can_claim_task() {
         let pool = Arc::new(DownloadPool::new(1, test_ctx(), test_cache()));
-        let uri = Url::parse("https://example.com/resume.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let task = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
         pool.add_task(task.clone()).await;
         task.lock().status = DownloadStatus::Paused;
@@ -475,7 +477,7 @@ mod tests {
     #[tokio::test]
     async fn remove_tasks_by_ids_cancels_worker_token() {
         let pool = DownloadPool::new(1, test_ctx(), test_cache());
-        let uri = Url::parse("https://example.com/cancel.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let task = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
         task.lock().cancel_token = Some(tokio_util::sync::CancellationToken::new());
         let token = task.lock().cancel_token.clone().unwrap();
@@ -490,7 +492,7 @@ mod tests {
     #[tokio::test]
     async fn cancel_task_by_id_keeps_cancelled_status() {
         let pool = Arc::new(DownloadPool::new(1, test_ctx(), test_cache()));
-        let uri = Url::parse("https://example.com/cancel2.mp4").unwrap();
+        let uri = Url::parse(&format!("{SAMPLE_MP4}?pool=cancel2")).unwrap();
         let task = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
         task.lock().cancel_token = Some(tokio_util::sync::CancellationToken::new());
         pool.add_task(task.clone()).await;

@@ -115,6 +115,8 @@ mod tests {
     use crate::global::{CacheKeyConfig, Config};
     use crate::matchers::UrlMatcherConfigurable;
 
+    use crate::test_urls::SAMPLE_MP4;
+
     use super::*;
 
     fn test_matcher() -> UrlMatcherConfigurable {
@@ -127,7 +129,7 @@ mod tests {
         let config = Config::default();
         let matcher = test_matcher();
         let ctx = CacheKeyContext::new(config.clone(), &matcher);
-        let url = "https://example.com/video.mp4";
+        let url = SAMPLE_MP4;
         let task = DownloadTask::new(to_safe_uri(url), None);
         let key = CacheKey::for_task(&task, &ctx).entry;
         cache.memory_put(&key, Bytes::from_static(b"cached")).await;

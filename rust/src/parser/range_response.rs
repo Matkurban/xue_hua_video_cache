@@ -114,7 +114,11 @@ pub fn format_content_range_for_file(
     response_end: i64,
     file_total: i64,
 ) -> String {
-    format!("bytes {}-{}/{}", spec.start, response_end, file_total)
+    if file_total > 0 {
+        format!("bytes {}-{}/{}", spec.start, response_end, file_total)
+    } else {
+        format!("bytes {}-{}/*", spec.start, response_end)
+    }
 }
 
 /// Whether a streaming MP4/default parser should answer with **206**.
@@ -152,6 +156,11 @@ pub fn clamped_range_end(spec: &RangeSpec, file_total: i64) -> i64 {
 pub fn streaming_content_length(spec: &RangeSpec, file_total: i64) -> i64 {
     let end = clamped_range_end(spec, file_total);
     (end - spec.start + 1).max(0)
+}
+
+/// Body length when the range has a known inclusive end (no file total required).
+pub fn streaming_body_length_from_spec(spec: &RangeSpec) -> Option<i64> {
+    spec.end.map(|end| (end - spec.start + 1).max(0))
 }
 
 /// Effective range for streaming body serve (full file when no `Range` header).
@@ -256,6 +265,18 @@ mod tests {
     }
 
     #[test]
+    fn format_content_range_for_file_unknown_total_uses_star() {
+        let spec = RangeSpec {
+            start: 0,
+            end: Some(1),
+        };
+        assert_eq!(
+            format_content_range_for_file(&spec, 1, -1),
+            "bytes 0-1/*"
+        );
+    }
+
+    #[test]
     fn streaming_default_open_from_zero_is_not_partial() {
         let spec = RangeSpec {
             start: 0,
@@ -289,5 +310,23 @@ mod tests {
         let spec = effective_streaming_spec(None);
         assert_eq!(spec.start, 0);
         assert_eq!(spec.end, None);
+    }
+
+    #[test]
+    fn streaming_body_length_from_spec_closed_range() {
+        let spec = RangeSpec {
+            start: 0,
+            end: Some(1),
+        };
+        assert_eq!(streaming_body_length_from_spec(&spec), Some(2));
+    }
+
+    #[test]
+    fn streaming_body_length_from_spec_open_ended_is_none() {
+        let spec = RangeSpec {
+            start: 100,
+            end: None,
+        };
+        assert_eq!(streaming_body_length_from_spec(&spec), None);
     }
 }

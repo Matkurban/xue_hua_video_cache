@@ -119,29 +119,27 @@ pub fn to_origin_url(input: &str) -> String {
 mod tests {
     use base64::Engine;
 
+    use crate::test_urls::SAMPLE_MP4;
+
     use super::*;
 
     #[test]
     fn to_origin_url_restores_from_proxy_path_with_origin_query() {
         let origin_b64 =
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"https://flutter.github.io");
-        let path = format!("/assets-for-api-docs/assets/videos/butterfly.mp4?origin={origin_b64}");
-        let restored = to_origin_url(&path);
-        assert_eq!(
-            restored,
-            "https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4"
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"https://jsontodart.cn");
+        let path = format!(
+            "/api/object/7976982000/msg_video_7976982000_1782918277290246.mp4?origin={origin_b64}"
         );
+        let restored = to_origin_url(&path);
+        assert_eq!(restored, SAMPLE_MP4);
     }
 
     #[test]
     fn to_origin_url_decodes_percent_encoded_full_url_path() {
-        let encoded = urlencoding::encode("https://flutter.github.io/assets/videos/butterfly.mp4");
+        let encoded = urlencoding::encode(SAMPLE_MP4);
         let path = format!("/{encoded}");
         let restored = to_origin_url(&path);
-        assert_eq!(
-            restored,
-            "https://flutter.github.io/assets/videos/butterfly.mp4"
-        );
+        assert_eq!(restored, SAMPLE_MP4);
     }
 
     #[test]
@@ -149,7 +147,7 @@ mod tests {
         let mut config = Config::default();
         config.ip = "127.0.0.1".to_string();
         config.port = 9999;
-        let remote = "https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4";
+        let remote = SAMPLE_MP4;
         let local = to_local_url(remote, &config);
         let uri = Url::parse(&local).unwrap();
         let proxy_path = format!("{}?{}", uri.path(), uri.query().unwrap_or(""));

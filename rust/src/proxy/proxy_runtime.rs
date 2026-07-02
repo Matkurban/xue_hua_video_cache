@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
+use tokio::sync::OnceCell;
 
 use crate::cache::LruCacheSingleton;
 use crate::download::DownloadManager;
@@ -12,6 +14,9 @@ pub struct ProxyRuntime {
     pub ctx: Arc<AppContext>,
     downloads: RwLock<Arc<DownloadManager>>,
     pub cache: Arc<LruCacheSingleton>,
+    /// In-flight content-length GET probes keyed by origin URI (dedupes concurrent ExoPlayer opens).
+    pub(crate) content_length_inflight:
+        Mutex<HashMap<String, Arc<OnceCell<Result<i64, String>>>>>,
 }
 
 impl ProxyRuntime {
@@ -24,6 +29,7 @@ impl ProxyRuntime {
             ctx,
             downloads: RwLock::new(downloads),
             cache,
+            content_length_inflight: Mutex::new(HashMap::new()),
         }
     }
 
@@ -57,17 +63,15 @@ mod tests {
     use crate::parser::url_parser::UrlParser;
     use crate::parser::url_parser_factory::UrlParserFactory;
 
+    use crate::test_urls::SAMPLE_MP4;
+
     use super::*;
 
     #[tokio::test]
     async fn parser_works_with_injected_runtime_without_global_init() {
         let runtime = build_test_runtime();
-        let uri = Url::parse("https://example.com/video.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let parser = UrlParserFactory::create_parser(&uri, runtime);
-        assert!(
-            !parser
-                .is_cached("https://example.com/video.mp4", None, 1)
-                .await
-        );
+        assert!(!parser.is_cached(SAMPLE_MP4, None, 1).await);
     }
 }

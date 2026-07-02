@@ -11,5 +11,7 @@ pub mod proxy;
 
 #[cfg(test)]
 mod butterfly_e2e_test;
+#[cfg(test)]
+pub mod test_urls;
 
 pub use proxy::PlatformKind;

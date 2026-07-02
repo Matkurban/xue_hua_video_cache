@@ -145,6 +145,8 @@ mod tests {
     use crate::proxy::PlatformKind;
     use crate::proxy::app_context::AppContext;
 
+    use crate::test_urls::SAMPLE_MP4;
+
     use super::*;
     use crate::download::download_pool::DownloadPool;
 
@@ -162,7 +164,7 @@ mod tests {
     #[tokio::test]
     async fn submit_replaces_lower_priority_task() {
         let pool = Arc::new(DownloadPool::new(1, test_ctx(), test_cache()));
-        let uri = Url::parse("https://example.com/priority.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let low = Arc::new(Mutex::new(DownloadTask::new(uri.clone(), None)));
         low.lock().priority = 1;
         let high = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
@@ -177,7 +179,7 @@ mod tests {
     #[tokio::test]
     async fn submit_skips_duplicate_entry() {
         let pool = Arc::new(DownloadPool::new(1, test_ctx(), test_cache()));
-        let uri = Url::parse("https://example.com/dedupe.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let t1 = Arc::new(Mutex::new(DownloadTask::new(uri.clone(), None)));
         let t2 = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
         pool.submit(t1).await;
@@ -189,8 +191,8 @@ mod tests {
     #[tokio::test]
     async fn overflow_downloading_task_is_paused_and_worker_cancelled() {
         let pool = Arc::new(DownloadPool::new(1, test_ctx(), test_cache()));
-        let uri1 = Url::parse("https://example.com/a.mp4").unwrap();
-        let uri2 = Url::parse("https://example.com/b.mp4").unwrap();
+        let uri1 = Url::parse(SAMPLE_MP4).unwrap();
+        let uri2 = Url::parse(&format!("{SAMPLE_MP4}?pool=2")).unwrap();
         let t1 = Arc::new(Mutex::new(DownloadTask::new(uri1, None)));
         let t2 = Arc::new(Mutex::new(DownloadTask::new(uri2, None)));
         t1.lock().status = DownloadStatus::Downloading;
@@ -209,7 +211,7 @@ mod tests {
     #[tokio::test]
     async fn resume_via_submit_leaves_task_claimable() {
         let pool = Arc::new(DownloadPool::new(1, test_ctx(), test_cache()));
-        let uri = Url::parse("https://example.com/resume-submit.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let task = Arc::new(Mutex::new(DownloadTask::new(uri, None)));
         pool.submit(task.clone()).await;
         task.lock().status = DownloadStatus::Paused;

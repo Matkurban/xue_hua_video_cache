@@ -4,8 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:xue_hua_video_cache/xue_hua_video_cache.dart';
 
-const butterflyMp4TestUrl =
-    'https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4';
+import '../../test/sample_mp4_url.dart';
 
 const _runE2e = bool.fromEnvironment('RUN_E2E', defaultValue: false);
 
@@ -52,23 +51,23 @@ void main() {
 
     test('precache marks segments cached and proxy URL is local', () async {
       expect(
-        await XueHuaVideoCache.isCached(butterflyMp4TestUrl, cacheSegments: 2),
+        await XueHuaVideoCache.isCached(sampleMp4TestUrl, cacheSegments: 2),
         isFalse,
       );
 
       await XueHuaVideoCache.precache(
-        butterflyMp4TestUrl,
+        sampleMp4TestUrl,
         cacheSegments: 2,
         downloadNow: true,
       );
 
       expect(
-        await _waitCached(butterflyMp4TestUrl, segments: 2),
+        await _waitCached(sampleMp4TestUrl, segments: 2),
         isTrue,
-        reason: 'timed out waiting for butterfly.mp4 segments',
+        reason: 'timed out waiting for sample mp4 segments',
       );
 
-      final local = butterflyMp4TestUrl.toLocalUrl();
+      final local = sampleMp4TestUrl.toLocalUrl();
       expect(local, contains('127.0.0.1'));
 
       final uri = Uri.parse(local);

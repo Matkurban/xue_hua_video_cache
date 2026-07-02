@@ -143,6 +143,8 @@ mod golden_tests {
     use crate::global::{CacheKeyConfig, Config};
     use crate::matchers::UrlMatcherConfigurable;
 
+    use crate::test_urls::SAMPLE_MP4;
+
     use super::*;
 
     fn ctx() -> (Config, UrlMatcherConfigurable) {
@@ -161,10 +163,10 @@ mod golden_tests {
     fn mp4_full_file_entry_equals_directory() {
         let (config, matcher) = ctx();
         let ctx = CacheKeyContext::new(config, &matcher);
-        let uri = Url::parse("https://cdn.example.com/video.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let task = DownloadTask::new(uri, None);
         let key = CacheKey::for_task(&task, &ctx);
-        let expected = generate_md5("https://cdn.example.com/video.mp4");
+        let expected = generate_md5(SAMPLE_MP4);
         assert_eq!(key.entry, expected);
         assert_eq!(key.directory, expected);
         assert_eq!(key.entry, key.directory);
@@ -174,21 +176,18 @@ mod golden_tests {
     fn mp4_range_segment_entry_differs_from_directory() {
         let (config, matcher) = ctx();
         let ctx = CacheKeyContext::new(config, &matcher);
-        let uri = Url::parse("https://cdn.example.com/video.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let mut task = DownloadTask::new(uri, None);
         task.start_range = 1_048_576;
         task.end_range = Some(2_097_151);
         let key = CacheKey::for_task(&task, &ctx);
-        let dir = generate_md5("https://cdn.example.com/video.mp4");
+        let dir = generate_md5(SAMPLE_MP4);
         assert_eq!(key.directory, dir);
         assert_ne!(key.entry, dir);
         assert_ne!(
             key.entry,
             CacheKey::for_task(
-                &DownloadTask::new(
-                    Url::parse("https://cdn.example.com/video.mp4").unwrap(),
-                    None
-                ),
+                &DownloadTask::new(Url::parse(SAMPLE_MP4).unwrap(), None),
                 &ctx
             )
             .entry
@@ -227,7 +226,7 @@ mod golden_tests {
         config.custom_cache_id = "Custom-Cache-ID".to_string();
         let (config, matcher) = ctx_with_config(config);
         let ctx = CacheKeyContext::new(config, &matcher);
-        let uri = Url::parse("https://cdn.example.com/video.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let mut task = DownloadTask::new(uri, None);
         let mut headers = HashMap::new();
         headers.insert(
@@ -237,10 +236,7 @@ mod golden_tests {
         task.headers = Some(headers);
         let key = CacheKey::for_task(&task, &ctx);
         let baseline = CacheKey::for_task(
-            &DownloadTask::new(
-                Url::parse("https://cdn.example.com/video.mp4").unwrap(),
-                None,
-            ),
+            &DownloadTask::new(Url::parse(SAMPLE_MP4).unwrap(), None),
             &ctx,
         );
         assert_ne!(key.entry, baseline.entry);
@@ -251,7 +247,7 @@ mod golden_tests {
     fn file_name_and_save_path_use_entry_stem() {
         let (config, matcher) = ctx();
         let ctx = CacheKeyContext::new(config, &matcher);
-        let uri = Url::parse("https://cdn.example.com/video.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let mut task = DownloadTask::new(uri, None);
         task.cache_dir = "/cache/root".to_string();
         let key = CacheKey::for_task(&task, &ctx);
@@ -267,14 +263,14 @@ mod golden_tests {
     fn ranged_segment_file_name_uses_ranged_entry() {
         let (config, matcher) = ctx();
         let ctx = CacheKeyContext::new(config, &matcher);
-        let uri = Url::parse("https://cdn.example.com/video.mp4").unwrap();
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
         let mut task = DownloadTask::new(uri, None);
         task.start_range = 1024;
         task.end_range = Some(2047);
         let key = CacheKey::for_task(&task, &ctx);
         let baseline = CacheKey::for_task(
             &DownloadTask::new(
-                Url::parse("https://cdn.example.com/video.mp4").unwrap(),
+                Url::parse(SAMPLE_MP4).unwrap(),
                 None,
             ),
             &ctx,

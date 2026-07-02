@@ -2,10 +2,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:xue_hua_video_cache/src/precache_progress_event.dart';
 import 'package:xue_hua_video_cache/src/rust/api/video_caching.dart' as frb;
 
+import 'sample_mp4_url.dart';
+
 void main() {
   group('PrecacheProgressEvent.fromInfo', () {
     test('maps range progress fields', () {
-      const url = 'https://example.com/video.mp4';
+      const url = sampleMp4TestUrl;
       final info = frb.PrecacheProgressInfo(
         progress: 0.5,
         url: url,
@@ -60,7 +62,7 @@ void main() {
     test('value equality mirrors mapped fields', () {
       final info = frb.PrecacheProgressInfo(
         progress: 0.25,
-        url: 'https://example.com/a.mp4',
+        url: sampleMp4TestUrl,
         startRange: 100,
       );
 

@@ -2,8 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:xue_hua_video_cache/src/rust/frb_generated.dart';
 import 'package:xue_hua_video_cache/xue_hua_video_cache.dart';
 
-const _sampleMp4 =
-    'https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4';
+import 'sample_mp4_url.dart';
 
 void main() {
   setUpAll(() async {
@@ -37,7 +36,7 @@ void main() {
 
   group('UrlExt', () {
     test('toLocalUrl uses default port before init', () {
-      expect(_sampleMp4.toLocalUrl(), contains('127.0.0.1'));
+      expect(sampleMp4TestUrl.toLocalUrl(), contains('127.0.0.1'));
       expect(XueHuaVideoCache.isInitialized, isFalse);
     });
   });

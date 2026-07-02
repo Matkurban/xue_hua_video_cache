@@ -5,7 +5,7 @@ use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::ext::log_ext::{log_d, log_w};
-use crate::ext::socket_ext::append_string;
+use crate::ext::socket_ext::write_bad_request;
 use crate::ext::string_ext::to_origin_url;
 use crate::parser::video_caching::VideoCaching;
 use crate::proxy::proxy_runtime::ProxyRuntime;
@@ -109,15 +109,20 @@ impl LocalProxyServer {
 async fn handle_connection(mut stream: TcpStream, runtime: Arc<ProxyRuntime>) {
     let mut buf = vec![0u8; 8192];
     let n = match stream.read(&mut buf).await {
+        Ok(0) => {
+            let _ = write_bad_request(&mut stream, "empty request").await;
+            return;
+        }
         Ok(n) => n,
         Err(e) => {
             log_w(&format!("Socket read error: {e}"));
+            let _ = write_bad_request(&mut stream, "request read failed").await;
             return;
         }
     };
     let request = String::from_utf8_lossy(&buf[..n]);
     if !request.contains("\r\n\r\n") {
-        let _ = append_string(&mut stream, "HTTP/1.1 400 Bad Request").await;
+        let _ = write_bad_request(&mut stream, "malformed request").await;
         return;
     }
     let (head, _) = request.split_once("\r\n\r\n").unwrap();
@@ -132,7 +137,7 @@ async fn handle_connection(mut stream: TcpStream, runtime: Arc<ProxyRuntime>) {
         }
     }
     if headers.is_empty() {
-        let _ = append_string(&mut stream, "HTTP/1.1 400 Bad Request").await;
+        let _ = write_bad_request(&mut stream, "missing headers").await;
         return;
     }
     let origin = to_origin_url(path);

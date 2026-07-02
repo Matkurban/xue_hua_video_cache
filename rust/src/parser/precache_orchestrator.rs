@@ -7,7 +7,7 @@ use crate::download::DownloadTask;
 use crate::ext::string_ext::to_safe_uri;
 use crate::proxy::ProxyRuntime;
 
-use super::range_responder::RangeResponder;
+use super::content_length_probe::ContentLengthProbe;
 use super::segment_fetcher::SegmentFetcher;
 use super::segment_resolver::SegmentResolver;
 use super::url_parser::PrecacheProgress;
@@ -24,7 +24,10 @@ impl PrecacheOrchestrator {
         mut cache_segments: usize,
     ) -> bool {
         let uri = to_safe_uri(url);
-        let content_length = RangeResponder::head(runtime, &uri, headers.as_ref()).await;
+        let header_map = headers.clone().unwrap_or_default();
+        let content_length = ContentLengthProbe::probe(runtime, &uri, &header_map)
+            .await
+            .unwrap_or(-1);
         let segment_size = runtime.ctx.config.read().segment_size;
 
         if content_length > 0 {
@@ -64,7 +67,10 @@ impl PrecacheOrchestrator {
         let tx = progress_tx;
 
         let uri = to_safe_uri(url);
-        let content_length = RangeResponder::head(runtime, &uri, headers.as_ref()).await;
+        let header_map = headers.clone().unwrap_or_default();
+        let content_length = ContentLengthProbe::probe(runtime, &uri, &header_map)
+            .await
+            .unwrap_or(-1);
         let config = runtime.ctx.config.read().clone();
         let segment_size = config.segment_size;
 
