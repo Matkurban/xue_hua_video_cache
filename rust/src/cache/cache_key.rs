@@ -66,6 +66,19 @@ impl CacheKey {
         }
     }
 
+    /// Dedicated cache slot for origin content-length metadata (not a byte range).
+    pub fn for_content_length(task: &DownloadTask, ctx: &CacheKeyContext<'_>) -> Self {
+        let directory = Self::directory_for(task);
+        let mut base_task = task.clone();
+        base_task.start_range = 0;
+        base_task.end_range = None;
+        let base_entry = compute_entry(&base_task, ctx);
+        Self {
+            entry: format!("{base_entry}__content_length__"),
+            directory,
+        }
+    }
+
     /// On-disk directory grouping (formerly `task_cache_key`).
     ///
     /// Does not depend on `Config` or `UrlMatcher`. See ADR-0001 for HLS invariants.
@@ -91,6 +104,10 @@ impl CacheKey {
 
     pub fn save_path(&self, task: &DownloadTask) -> String {
         format!("{}/{}", task.cache_dir, self.file_name(task))
+    }
+
+    pub fn content_length_file_name(&self) -> String {
+        format!("{}__content_length__.meta", self.directory)
     }
 }
 
@@ -257,6 +274,22 @@ mod golden_tests {
             key.save_path(&task),
             format!("/cache/root/{}", key.file_name(&task))
         );
+    }
+
+    #[test]
+    fn content_length_entry_differs_from_bytes_0_1_and_full_file() {
+        let (config, matcher) = ctx();
+        let ctx = CacheKeyContext::new(config, &matcher);
+        let uri = Url::parse(SAMPLE_MP4).unwrap();
+        let mut task = DownloadTask::new(uri, None);
+        let full = CacheKey::for_task(&task, &ctx);
+        let metadata = CacheKey::for_content_length(&task, &ctx);
+        task.start_range = 0;
+        task.end_range = Some(1);
+        let bytes_0_1 = CacheKey::for_task(&task, &ctx);
+        assert_ne!(metadata.entry, full.entry);
+        assert_ne!(metadata.entry, bytes_0_1.entry);
+        assert_eq!(metadata.directory, full.directory);
     }
 
     #[test]

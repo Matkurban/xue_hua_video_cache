@@ -41,8 +41,6 @@ impl ContentLengthProbe {
                 if len > 0 {
                     let mut probe = DownloadTask::new(uri.clone(), None);
                     probe.headers = Some(headers.clone());
-                    probe.start_range = 0;
-                    probe.end_range = Some(1);
                     SegmentResolver::store_content_length(runtime, &probe, len).await;
                     Ok(len)
                 } else {
@@ -145,16 +143,7 @@ async fn read_cached_content_length(
 ) -> Option<i64> {
     let mut probe = DownloadTask::new(uri.clone(), None);
     probe.headers = Some(headers.clone());
-    probe.start_range = 0;
-    probe.end_range = Some(1);
-
-    let data = SegmentResolver::resolve(runtime, &probe).await?;
-    let len = String::from_utf8_lossy(&data).parse::<i64>().ok()?;
-    if len > 0 {
-        Some(len)
-    } else {
-        None
-    }
+    SegmentResolver::read_content_length(runtime, &probe).await
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
@@ -9,8 +10,23 @@ const _sampleMp4 =
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final lifecycle = _AppLifecycleObserver();
+  WidgetsBinding.instance.addObserver(lifecycle);
   await XueHuaVideoCache.initialize(logPrint: true);
   runApp(const ExampleApp());
+}
+
+class _AppLifecycleObserver extends WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      unawaited(
+        XueHuaVideoCache.dispose().catchError((Object e, StackTrace s) {
+          developer.log('dispose failed: $e', stackTrace: s);
+        }),
+      );
+    }
+  }
 }
 
 class ExampleApp extends StatefulWidget {
@@ -21,12 +37,6 @@ class ExampleApp extends StatefulWidget {
 }
 
 class _ExampleAppState extends State<ExampleApp> {
-  @override
-  void dispose() {
-    XueHuaVideoCache.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(

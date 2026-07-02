@@ -59,9 +59,6 @@ class VideoCaching {
         if (controller.isClosed) return;
         final event = PrecacheProgressEvent.fromInfo(info);
         controller.add(event);
-        if (event.progress >= 1.0 && !controller.isClosed) {
-          controller.close();
-        }
       },
       onError: (Object error, StackTrace stackTrace) {
         if (!controller.isClosed) {

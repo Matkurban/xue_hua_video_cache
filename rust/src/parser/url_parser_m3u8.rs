@@ -228,26 +228,31 @@ impl UrlParser for UrlParserM3U8 {
                     headers.as_ref(),
                 )));
                 let snapshot = task.lock().clone();
-                if self.cache(&snapshot).await.is_none() {
-                    if self.download(task.clone()).await.is_none() {
+                let mut success = self.cache(&snapshot).await.is_some();
+                if !success {
+                    if self.download(task.clone()).await.is_some() {
+                        success = true;
+                    } else {
                         failures += 1;
                     }
                 }
-                downloaded += 1;
-                if let Some(ref sender) = tx {
-                    let t = task.lock();
-                    let _ = sender.send(PrecacheProgress {
-                        progress: downloaded as f64 / total as f64,
-                        url: t.url(),
-                        start_range: Some(t.start_range),
-                        end_range: t.end_range,
-                        segment_url: Some(segment.url.clone()),
-                        parent_url: Some(url_owned.clone()),
-                        file_name: Some(t.file_name.clone()),
-                        hls_key: Some(hls_key.clone()),
-                        total_segments: Some(total),
-                        current_segment_index: Some(downloaded - 1),
-                    });
+                if success {
+                    downloaded += 1;
+                    if let Some(ref sender) = tx {
+                        let t = task.lock();
+                        let _ = sender.send(PrecacheProgress {
+                            progress: downloaded as f64 / total as f64,
+                            url: t.url(),
+                            start_range: Some(t.start_range),
+                            end_range: t.end_range,
+                            segment_url: Some(segment.url.clone()),
+                            parent_url: Some(url_owned.clone()),
+                            file_name: Some(t.file_name.clone()),
+                            hls_key: Some(hls_key.clone()),
+                            total_segments: Some(total),
+                            current_segment_index: Some(downloaded - 1),
+                        });
+                    }
                 }
             }
             if failures > 0 {

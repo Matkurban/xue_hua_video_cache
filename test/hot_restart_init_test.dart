@@ -4,6 +4,10 @@ import 'package:xue_hua_video_cache/xue_hua_video_cache.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  tearDown(() async {
+    await XueHuaVideoCache.dispose();
+  });
+
   test('initialize twice simulates hot restart', () async {
     const cacheDir = '/tmp/xue_hua_hot_restart_test';
     await XueHuaVideoCache.initialize(cacheDir: cacheDir);

@@ -133,6 +133,9 @@ impl PrecacheOrchestrator {
                         let ok = SegmentFetcher::download(&runtime, task_arc.clone())
                             .await
                             .is_some();
+                        if !ok {
+                            return false;
+                        }
                         let mut n = downloaded.lock();
                         *n += 1;
                         if let Some(sender) = tx_clone {
@@ -150,7 +153,7 @@ impl PrecacheOrchestrator {
                                 current_segment_index: None,
                             });
                         }
-                        ok
+                        true
                     })
                 });
             } else {
